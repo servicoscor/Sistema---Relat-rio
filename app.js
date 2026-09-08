@@ -1,7 +1,7 @@
 const CFG = window.APP_CONFIG || {};
 const sbReady = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && !CFG.SUPABASE_URL.includes('SEU-PROJETO'));
 const supabaseLibReady = !!window.supabase;
-const supabase = sbReady && supabaseLibReady ? window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY) : null;
+const supabaseClient = sbReady && supabaseLibReady ? window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY) : null;
 const MESES = ['janeiro','fevereiro','marco','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 const state = {
   loading: true, error: '', authMode: 'login', authEmail: '', authPass: '', authName: '', authTeam: '',
@@ -26,10 +26,10 @@ function removeList(k,i){state.form[k]=state.form[k].filter((_,j)=>j!==i);if(!st
 async function init(){
   try{
     if(!sbReady || !supabaseLibReady){state.loading=false;render();return}
-    const {data:{session}} = await supabase.auth.getSession();
+    const {data:{session}} = await supabaseClient.auth.getSession();
     if(session?.user) await loadUser(session.user);
     state.loading=false;render();
-    supabase.auth.onAuthStateChange(async(_event,session)=>{state.user=session?.user||null;if(state.user)await loadUser(state.user);else state.profile=null;render()});
+    supabaseClient.auth.onAuthStateChange(async(_event,session)=>{state.user=session?.user||null;if(state.user)await loadUser(state.user);else state.profile=null;render()});
   }catch(err){
     state.loading=false;
     state.error=err.message || String(err);
@@ -39,7 +39,7 @@ async function init(){
 
 async function loadUser(user){
   state.user=user;
-  const {data,error}=await supabase.from('profiles').select('*').eq('id',user.id).single();
+  const {data,error}=await supabaseClient.from('profiles').select('*').eq('id',user.id).single();
   if(error){state.error=error.message;return}
   state.profile=data;
   if(!state.form.equipe && data.equipe) state.form.equipe=data.equipe;
@@ -48,7 +48,7 @@ async function loadUser(user){
 }
 
 async function loadRecords(){
-  const {data,error}=await supabase.from('plantoes').select('*').order('data',{ascending:true});
+  const {data,error}=await supabaseClient.from('plantoes').select('*').order('data',{ascending:true});
   if(error){state.error=error.message;state.records=[];return}
   state.records=data||[];
 }
@@ -58,34 +58,34 @@ async function loginOrSignup(){
   const email=state.authEmail.trim().toLowerCase();
   if(!email||!state.authPass){state.error='Informe e-mail e senha.';render();return}
   if(state.authMode==='login'){
-    const {error}=await supabase.auth.signInWithPassword({email,password:state.authPass});
+    const {error}=await supabaseClient.auth.signInWithPassword({email,password:state.authPass});
     if(error) state.error=error.message;
   }else{
     if(!state.authName.trim()){state.error='Informe o nome completo.';render();return}
-    const {error}=await supabase.auth.signUp({email,password:state.authPass,options:{data:{nome:state.authName.trim(),equipe:state.authTeam.trim()}}});
+    const {error}=await supabaseClient.auth.signUp({email,password:state.authPass,options:{data:{nome:state.authName.trim(),equipe:state.authTeam.trim()}}});
     if(error) state.error=error.message;
     else state.error='Cadastro criado. Se o Supabase pedir confirmacao, confirme o e-mail antes de entrar.';
   }
   render();
 }
 
-async function logout(){await supabase.auth.signOut();state.user=null;state.profile=null;state.view='form';render()}
+async function logout(){await supabaseClient.auth.signOut();state.user=null;state.profile=null;state.view='form';render()}
 
 async function saveRecord(){
   const f=state.form, ocs=(f.ocorrencias||[]).filter(o=>String(o.texto||'').trim()), faltas=(f.faltas||[]).filter(x=>String(x.nome||'').trim());
   const payload={data:f.data,turno:f.turno,equipe:f.equipe.trim(),coordenador:f.coordenador.trim(),integrantes:clean(f.integrantes),faltas:faltas.map(x=>({nome:x.nome.trim(),motivo:String(x.motivo||'').trim()})),dia:clean(f.dia),proximo:clean(f.proximo),ocorrencias:ocs.map(o=>({hora:o.hora,gravidade:o.gravidade,texto:o.texto.trim()})),autor_id:state.user.id};
-  const {error}=await supabase.from('plantoes').upsert(payload,{onConflict:'data,turno,equipe'});
+  const {error}=await supabaseClient.from('plantoes').upsert(payload,{onConflict:'data,turno,equipe'});
   if(error){state.error=error.message;render();return}
   state.saved=true;await loadRecords();render();setTimeout(()=>{state.saved=false;render()},2200);
 }
 
 function clearForm(){if(confirm('Apagar todos os dados deste plantao?')){state.form=emptyForm();render()}}
-async function clearHistory(){if(!isChief()||!confirm('Apagar todos os plantoes salvos?'))return;const{error}=await supabase.from('plantoes').delete().neq('id','00000000-0000-0000-0000-000000000000');if(error)state.error=error.message;await loadRecords();render()}
+async function clearHistory(){if(!isChief()||!confirm('Apagar todos os plantoes salvos?'))return;const{error}=await supabaseClient.from('plantoes').delete().neq('id','00000000-0000-0000-0000-000000000000');if(error)state.error=error.message;await loadRecords();render()}
 function windowDates(){const ref=parseDate(state.refDate);if(state.period==='mes')return[new Date(ref.getFullYear(),ref.getMonth(),1),new Date(ref.getFullYear(),ref.getMonth()+1,0)];const s=new Date(ref);s.setDate(ref.getDate()-((ref.getDay()+6)%7));const e=new Date(s);e.setDate(s.getDate()+6);return[s,e]}
 function periodRecords(){const[start,end]=windowDates().map(isoDate);return state.records.filter(r=>r.data>=start&&r.data<=end).filter(r=>state.filterTurn==='Todos'||r.turno===state.filterTurn).filter(r=>state.filterTeam==='Todas as equipes'||(r.equipe||'-')===state.filterTeam)}
 function exportCsv(){const rows=periodRecords(),[start,end]=windowDates().map(isoDate),header=['data','turno','equipe','coordenador','integrantes','faltas','demandas_do_dia','proximo_plantao','ocorrencias'],cell=v=>`"${String(v??'').replace(/"/g,'""')}"`;const lines=rows.map(r=>[r.data,r.turno,r.equipe,r.coordenador,(r.integrantes||[]).join(' | '),(r.faltas||[]).map(f=>`${f.nome}${f.motivo?` (${f.motivo})`:''}`).join(' | '),(r.dia||[]).join(' | '),(r.proximo||[]).join(' | '),(r.ocorrencias||[]).map(o=>`${o.hora||'--'} [${o.gravidade}] ${o.texto}`).join(' | ')].map(cell).join(','));const blob=new Blob(['\ufeff'+[header.join(','),...lines].join('\n')],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`plantoes-${start}-a-${end}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 
-function setupView(){return`<main class="wrap"><section class="section"><h1>Configurar Supabase</h1>${!supabaseLibReady?'<p class="error">A biblioteca do Supabase nao carregou. Verifique se o servidor ou navegador tem acesso a https://cdn.jsdelivr.net.</p>':''}${!sbReady?'<p class="error">O arquivo <strong>config.js</strong> ainda nao foi configurado.</p>':''}<p>Crie uma copia de <strong>config.example.js</strong> chamada <strong>config.js</strong> e preencha <strong>SUPABASE_URL</strong> e <strong>SUPABASE_ANON_KEY</strong>. Depois execute o SQL de <strong>supabase/schema.sql</strong> no painel do Supabase.</p></section></main>`}
+function setupView(){return`<main class="wrap"><section class="section"><h1>Configurar Supabase</h1>${!supabaseLibReady?'<p class="error">A biblioteca do Supabase nao carregou. Verifique se o arquivo supabase-js.min.js foi publicado corretamente.</p>':''}${!sbReady?'<p class="error">O arquivo <strong>config.js</strong> ainda nao foi configurado.</p>':''}<p>Crie uma copia de <strong>config.example.js</strong> chamada <strong>config.js</strong> e preencha <strong>SUPABASE_URL</strong> e <strong>SUPABASE_ANON_KEY</strong>. Depois execute o SQL de <strong>supabase/schema.sql</strong> no painel do Supabase.</p></section></main>`}
 function authView(){return`<main class="login"><div class="login-visual"></div><section class="login-panel"><div class="login-card"><div class="seg"><label><input type="radio" name="auth" ${state.authMode==='login'?'checked':''} onchange="setValue('authMode','login')">Entrar</label><label><input type="radio" name="auth" ${state.authMode==='signup'?'checked':''} onchange="setValue('authMode','signup')">Criar conta</label></div><h1 style="font-size:34px;margin:26px 0 8px">${state.authMode==='login'?'Entrar no sistema':'Cadastrar acesso'}</h1><p class="hint">${state.authMode==='login'?'Use o e-mail cadastrado no Supabase.':'O perfil sera aplicado pelo banco conforme as regras de acesso.'}</p><div class="field"><label>E-mail funcional</label><input type="email" value="${esc(state.authEmail)}" oninput="state.authEmail=this.value"></div>${state.authMode==='signup'?`<div class="grid2"><div class="field"><label>Nome completo</label><input value="${esc(state.authName)}" oninput="state.authName=this.value"></div><div class="field"><label>Equipe</label><input value="${esc(state.authTeam)}" oninput="state.authTeam=this.value"></div></div>`:''}<div class="field"><label>Senha</label><input type="password" value="${esc(state.authPass)}" oninput="state.authPass=this.value"></div>${state.error?`<p class="${state.error.includes('criado')?'hint':'error'}">${esc(state.error)}</p>`:''}<button class="primary" onclick="loginOrSignup()">${state.authMode==='login'?'Entrar':'Criar acesso'}</button></div></section></main>`}
 function topbar(){return`<nav class="topbar no-print"><div class="brand">Relatorio de Plantao</div><div class="userbox"><strong>${esc(state.profile.nome)}</strong>${esc(state.profile.perfil)}${state.profile.equipe?' - '+esc(state.profile.equipe):''}</div><button onclick="clearForm()">Limpar</button>${isChief()?`<button onclick="state.view='consolidado';render()">Consolidado</button>`:''}<button onclick="logout()">Sair</button><button class="secondary" onclick="saveRecord()">${state.saved?'Plantao salvo':'Salvar plantao'}</button><button class="secondary" onclick="state.view='report';render();setTimeout(print,120)">Imprimir / PDF</button><button class="primary" onclick="state.view=state.view==='form'?'report':'form';render()">${state.view==='form'?'Gerar relatorio':'Voltar a edicao'}</button></nav>`}
 function listRows(k,p){return state.form[k].map((v,i)=>`<div class="row"><textarea rows="2" placeholder="${p}" oninput="state.form.${k}[${i}]=this.value">${esc(v)}</textarea><button class="danger" onclick="removeList('${k}',${i})">Remover</button></div>`).join('')}
@@ -95,3 +95,4 @@ function reportView(){const f=state.form,integrantes=clean(f.integrantes),faltas
 function consolidatedView(){const rows=periodRecords(),[start,end]=windowDates().map(isoDate),teams=Array.from(new Set(state.records.map(r=>r.equipe).filter(Boolean))).sort(),ocs=rows.flatMap(r=>(r.ocorrencias||[]).map(o=>({...o,data:r.data,turno:r.turno,equipe:r.equipe}))),faltas=rows.flatMap(r=>(r.faltas||[]).map(f=>({...f,data:r.data}))),pend=rows.flatMap(r=>(r.proximo||[]).map(p=>({texto:p,data:r.data,turno:r.turno,equipe:r.equipe})));return`${topbar()}<main class="wrap"><section class="section"><div class="kicker">Relatorio consolidado</div><h1>${state.period==='mes'?`${MESES[parseDate(state.refDate).getMonth()]} de ${parseDate(state.refDate).getFullYear()}`:'Semana operacional'}</h1><p class="hint">${shortDate(start)} a ${shortDate(end)} - ${state.filterTurn.toLowerCase()} - ${state.filterTeam.toLowerCase()}</p><div class="no-print row"><div class="seg"><label><input type="radio" name="period" ${state.period==='semana'?'checked':''} onchange="setValue('period','semana')">Semanal</label><label><input type="radio" name="period" ${state.period==='mes'?'checked':''} onchange="setValue('period','mes')">Mensal</label></div><select onchange="setValue('filterTurn',this.value)"><option>Todos</option><option ${state.filterTurn==='Diurno'?'selected':''}>Diurno</option><option ${state.filterTurn==='Noturno'?'selected':''}>Noturno</option></select><select onchange="setValue('filterTeam',this.value)"><option>Todas as equipes</option>${teams.map(t=>`<option ${state.filterTeam===t?'selected':''}>${esc(t)}</option>`).join('')}</select><input type="date" value="${esc(state.refDate)}" onchange="setValue('refDate',this.value)"></div></section><section class="grid5"><div class="metric"><strong>${String(rows.length).padStart(2,'0')}</strong><span>Plantoes</span></div><div class="metric"><strong>${String(rows.filter(r=>r.turno==='Diurno').length).padStart(2,'0')}</strong><span>Diurnos</span></div><div class="metric"><strong>${String(rows.filter(r=>r.turno==='Noturno').length).padStart(2,'0')}</strong><span>Noturnos</span></div><div class="metric"><strong>${String(ocs.length).padStart(2,'0')}</strong><span>Ocorrencias</span></div><div class="metric"><strong>${String(faltas.length).padStart(2,'0')}</strong><span>Faltas</span></div></section><section class="section"><h3>Plantoes salvos</h3>${rows.length?`<table><thead><tr><th>Data</th><th>Turno</th><th>Equipe</th><th>Coordenador</th><th>Demandas</th><th>Pendencias</th><th>Ocorrencias</th><th>Faltas</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${shortDate(r.data)}</td><td>${esc(r.turno)}</td><td>${esc(r.equipe||'-')}</td><td>${esc(r.coordenador||'-')}</td><td>${(r.dia||[]).length}</td><td>${(r.proximo||[]).length}</td><td>${(r.ocorrencias||[]).length}</td><td>${(r.faltas||[]).length}</td></tr>`).join('')}</tbody></table>`:'<p class="hint">Nenhum plantao salvo neste periodo.</p>'}</section><section class="section grid2"><div><h3>Ocorrencias do periodo</h3>${ocs.length?ocs.map(o=>`<p><strong>${shortDate(o.data)} - ${esc(o.turno)} - ${esc(o.hora||'sem hora')}</strong><br>${esc(o.texto)}</p>`).join(''):'<p class="hint">Sem ocorrencias no periodo.</p>'}</div><div><h3>Pendencias em aberto</h3>${pend.length?pend.map(p=>`<p><strong>${shortDate(p.data)} - ${esc(p.turno)} - ${esc(p.equipe||'-')}</strong><br>${esc(p.texto)}</p>`).join(''):'<p class="hint">Sem pendencias no periodo.</p>'}</div></section><section class="section"><h3>Faltas do periodo</h3>${faltas.length?`<table><thead><tr><th>Data</th><th>Nome</th><th>Justificativa</th></tr></thead><tbody>${faltas.map(f=>`<tr><td>${shortDate(f.data)}</td><td>${esc(f.nome)}</td><td>${esc(f.motivo||'Sem justificativa')}</td></tr>`).join('')}</tbody></table>`:'<p class="hint">Nenhuma falta no periodo.</p>'}<div class="no-print" style="margin-top:24px"><button class="secondary" onclick="exportCsv()">Exportar CSV</button> <button class="danger" onclick="clearHistory()">Apagar historico</button></div></section></main>`}
 function render(){const app=document.getElementById('app');if(state.loading)app.innerHTML='<main class="wrap"><p>Carregando...</p></main>';else if(!sbReady||!supabaseLibReady)app.innerHTML=setupView();else if(!state.user)app.innerHTML=authView();else if(state.view==='report')app.innerHTML=reportView();else if(state.view==='consolidado'&&isChief())app.innerHTML=consolidatedView();else app.innerHTML=formView()}
 init();
+

@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/modernist-b146dfa9-8fb7-4032-9ef1-3d71be800a9e/styles.css">
+<script src="_ds/modernist-b146dfa9-8fb7-4032-9ef1-3d71be800a9e/_ds_bundle.js"></script>
+<style>
+  a { color: var(--color-accent-700); text-decoration: none; }
+  a:hover { color: var(--color-accent); text-decoration: underline; }
+  textarea.input { resize: vertical; font-family: var(--font-body); }
+  @media print {
+    .no-print { display: none !important; }
+    body { background: #fff; }
+  }
+</style>
+</helmet>
+<div style="min-height:100vh;background:var(--color-bg);color:var(--color-text)">
+  <sc-if value="{{ mostrarAuth }}" hint-placeholder-val="{{ false }}">
+  <div style="min-height:100vh;display:grid;grid-template-columns:0.9fr 1.1fr">
+    <div style="background:var(--color-accent-900);overflow:hidden">
+      <img src="assets/capa-login.png" alt="Sistema de Relatórios" style="width:100%;height:100vh;object-fit:cover;display:block">
+    </div>
+
+    <div style="padding:48px 56px;display:flex;flex-direction:column;justify-content:center;max-width:620px">
+      <div class="seg" style="align-self:flex-start;margin-bottom:28px">
+        <label class="seg-opt"><input type="radio" name="auth-aba" checked="{{ abaEntrar }}" onChange="{{ setAbaEntrar }}">Entrar</label>
+        <label class="seg-opt"><input type="radio" name="auth-aba" checked="{{ abaCadastro }}" onChange="{{ setAbaCadastro }}">Criar conta</label>
+      </div>
+
+      <h2 style="font-size:30px;margin:0 0 6px">{{ tituloAuth }}</h2>
+      <p style="font-size:14px;color:var(--color-neutral-700);margin:0 0 24px">{{ subAuth }}</p>
+
+      <div class="field" style="margin-bottom:16px">
+        <label>E-mail funcional</label>
+        <input class="input" type="email" placeholder="nome@orgao.gov.br" value="{{ authEmail }}" onChange="{{ setAuthEmail }}">
+      </div>
+
+      <sc-if value="{{ abaCadastro }}" hint-placeholder-val="{{ false }}">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+          <div class="field" style="margin:0">
+            <label>Nome completo</label>
+            <input class="input" placeholder="Nome e sobrenome" value="{{ authNome }}" onChange="{{ setAuthNome }}">
+          </div>
+          <div class="field" style="margin:0">
+            <label>Equipe / plantão</label>
+            <input class="input" placeholder="Ex.: Equipe B — Noturno" value="{{ authEquipe }}" onChange="{{ setAuthEquipe }}">
+          </div>
+        </div>
+        <div style="margin-bottom:16px;border-top:2px solid var(--color-divider);padding-top:12px">
+          <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent)">Perfil de acesso · Supervisor</div>
+          <p style="font-size:12px;color:var(--color-neutral-700);margin:6px 0 0">Registra e imprime apenas o relatório do próprio plantão. Perfil de chefia é concedido internamente.</p>
+        </div>
+      </sc-if>
+
+      <div class="field" style="margin-bottom:8px">
+        <label>Senha</label>
+        <input class="input" type="password" placeholder="Mínimo 6 caracteres" value="{{ authSenha }}" onChange="{{ setAuthSenha }}">
+      </div>
+
+      <sc-if value="{{ temErro }}" hint-placeholder-val="{{ false }}">
+        <p style="font-size:14px;color:var(--color-accent-700);margin:12px 0 0">{{ erroAuth }}</p>
+      </sc-if>
+
+      <div style="display:flex;gap:12px;margin-top:24px">
+        <button class="btn btn-primary" onClick="{{ enviarAuth }}">{{ rotuloAuth }}</button>
+        <sc-if value="{{ temContas }}" hint-placeholder-val="{{ false }}">
+          <button class="btn btn-ghost" onClick="{{ trocarAba }}">{{ rotuloTrocar }}</button>
+        </sc-if>
+      </div>
+
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ logado }}" hint-placeholder-val="{{ true }}">
+  <div class="nav no-print" style="position:sticky;top:0;z-index:5;background:var(--color-bg)">
+    <div class="nav-brand">Relatório de Plantão</div>
+    <div style="display:flex;flex-direction:column;margin-right:16px;text-align:right">
+      <span style="font-size:13px;font-family:var(--font-heading);font-weight:600">{{ usuarioNome }}</span>
+      <span style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-700)">{{ usuarioPerfil }}</span>
+    </div>
+    <button class="btn btn-ghost" onClick="{{ limpar }}">Limpar</button>
+    <sc-if value="{{ podeConsolidado }}" hint-placeholder-val="{{ true }}">
+      <button class="btn btn-ghost" onClick="{{ verConsolidado }}">Consolidado</button>
+    </sc-if>
+    <button class="btn btn-ghost" onClick="{{ sair }}">Sair</button>
+    <button class="btn btn-secondary" onClick="{{ salvarPlantao }}">{{ rotuloSalvar }}</button>
+    <button class="btn btn-secondary" onClick="{{ imprimir }}">Imprimir / PDF</button>
+    <button class="btn btn-primary" onClick="{{ alternarVista }}">{{ rotuloVista }}</button>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ mostrarForm }}" hint-placeholder-val="{{ true }}">
+  <div style="max-width:1180px;margin:0 auto;padding:32px 24px 80px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:2px solid var(--color-divider);border-bottom:2px solid var(--color-divider)">
+      <div style="padding:24px 28px 28px 0;border-right:2px solid var(--color-divider)">
+        <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-accent);margin-bottom:16px">01 — Identificação</div>
+        <div class="field" style="margin-bottom:18px">
+          <label>Data do plantão</label>
+          <input class="input" type="date" value="{{ data }}" onChange="{{ setData }}">
+        </div>
+        <div class="field" style="margin-bottom:18px">
+          <label>Turno</label>
+          <div class="seg">
+            <label class="seg-opt"><input type="radio" name="turno" checked="{{ turnoDiurno }}" onChange="{{ setDiurno }}">Diurno</label>
+            <label class="seg-opt"><input type="radio" name="turno" checked="{{ turnoNoturno }}" onChange="{{ setNoturno }}">Noturno</label>
+          </div>
+        </div>
+        <div class="field" style="margin-bottom:18px">
+          <label>Equipe</label>
+          <input class="input" placeholder="Ex.: Equipe B — Operações" value="{{ equipe }}" onChange="{{ setEquipe }}">
+        </div>
+        <div class="field">
+          <label>Coordenador responsável</label>
+          <input class="input" placeholder="Nome completo" value="{{ coordenador }}" onChange="{{ setCoordenador }}">
+        </div>
+      </div>
+
+      <div style="padding:24px 0 28px 28px">
+        <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-accent);margin-bottom:16px">02 — Integrantes de plantão</div>
+        <sc-for list="{{ integrantes }}" as="it" hint-placeholder-count="2">
+          <div style="display:flex;gap:8px;margin-bottom:8px">
+            <input class="input" style="flex:1" placeholder="Nome do integrante" value="{{ it.value }}" onChange="{{ it.onChange }}">
+            <button class="btn btn-ghost" onClick="{{ it.onRemove }}">Remover</button>
+          </div>
+        </sc-for>
+        <button class="btn btn-secondary" style="margin-top:8px" onClick="{{ addIntegrante }}">+ Integrante</button>
+
+        <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-accent);margin:28px 0 6px">Faltas</div>
+        <p style="font-size:13px;color:var(--color-neutral-700);margin:0 0 16px">Ausências do plantão e justificativa.</p>
+        <sc-for list="{{ faltas }}" as="f" hint-placeholder-count="1">
+          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:8px">
+            <input class="input" placeholder="Nome" value="{{ f.nome }}" onChange="{{ f.onNome }}">
+            <input class="input" placeholder="Justificativa" value="{{ f.motivo }}" onChange="{{ f.onMotivo }}">
+            <button class="btn btn-ghost" onClick="{{ f.onRemove }}">×</button>
+          </div>
+        </sc-for>
+        <button class="btn btn-secondary" style="margin-top:8px" onClick="{{ addFalta }}">+ Falta</button>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border-bottom:2px solid var(--color-divider)">
+      <div style="padding:24px 28px 28px 0;border-right:2px solid var(--color-divider)">
+        <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-accent);margin-bottom:6px">03 — Demandas do dia</div>
+        <p style="font-size:13px;color:var(--color-neutral-700);margin:0 0 16px">O que foi executado neste plantão.</p>
+        <sc-for list="{{ demandasDia }}" as="it" hint-placeholder-count="3">
+          <div style="display:flex;gap:8px;margin-bottom:8px;align-items:flex-start">
+            <div style="width:22px;padding-top:10px;font-size:12px;color:var(--color-neutral-600)">{{ it.n }}</div>
+            <textarea class="input" rows="2" style="flex:1" placeholder="Descreva a demanda" value="{{ it.value }}" onChange="{{ it.onChange }}"></textarea>
+            <button class="btn btn-ghost" onClick="{{ it.onRemove }}">×</button>
+          </div>
+        </sc-for>
+        <button class="btn btn-secondary" style="margin-top:8px" onClick="{{ addDia }}">+ Demanda</button>
+      </div>
+      <div style="padding:24px 0 28px 28px">
+        <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-accent);margin-bottom:6px">04 — Para o próximo plantão</div>
+        <p style="font-size:13px;color:var(--color-neutral-700);margin:0 0 16px">Pendências e repasses.</p>
+        <sc-for list="{{ demandasProximo }}" as="it" hint-placeholder-count="3">
+          <div style="display:flex;gap:8px;margin-bottom:8px;align-items:flex-start">
+            <div style="width:22px;padding-top:10px;font-size:12px;color:var(--color-neutral-600)">{{ it.n }}</div>
+            <textarea class="input" rows="2" style="flex:1" placeholder="Descreva a pendência" value="{{ it.value }}" onChange="{{ it.onChange }}"></textarea>
+            <button class="btn btn-ghost" onClick="{{ it.onRemove }}">×</button>
+          </div>
+        </sc-for>
+        <button class="btn btn-secondary" style="margin-top:8px" onClick="{{ addProximo }}">+ Pendência</button>
+      </div>
+    </div>
+
+    <div style="padding:24px 0 0">
+      <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-accent);margin-bottom:6px">05 — Ocorrências</div>
+      <p style="font-size:13px;color:var(--color-neutral-700);margin:0 0 16px">Registre horário, gravidade e o que aconteceu.</p>
+      <sc-for list="{{ ocorrencias }}" as="oc" hint-placeholder-count="1">
+        <div style="display:grid;grid-template-columns:120px 160px 1fr auto;gap:8px;margin-bottom:10px;align-items:flex-start">
+          <input class="input" type="time" value="{{ oc.hora }}" onChange="{{ oc.onHora }}">
+          <select class="input" value="{{ oc.gravidade }}" onChange="{{ oc.onGravidade }}">
+            <option value="Baixa">Baixa</option>
+            <option value="Média">Média</option>
+            <option value="Alta">Alta</option>
+          </select>
+          <textarea class="input" rows="2" placeholder="Descrição da ocorrência e providências" value="{{ oc.texto }}" onChange="{{ oc.onTexto }}"></textarea>
+          <button class="btn btn-ghost" onClick="{{ oc.onRemove }}">Remover</button>
+        </div>
+      </sc-for>
+      <button class="btn btn-secondary" style="margin-top:8px" onClick="{{ addOcorrencia }}">+ Ocorrência</button>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ mostrarRelatorio }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:900px;margin:0 auto;padding:40px 24px 96px">
+    <div style="border-bottom:2px solid var(--color-divider);padding-bottom:20px">
+      <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--color-accent)">Relatório de plantão</div>
+      <h1 style="font-size:44px;margin:10px 0 14px">{{ tituloRelatorio }}</h1>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:2px solid var(--color-divider);padding-top:14px">
+        <div style="padding-right:16px">
+          <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600)">Equipe</div>
+          <div style="font-size:16px;margin-top:4px">{{ equipeOut }}</div>
+        </div>
+        <div style="padding:0 16px;border-left:2px solid var(--color-divider)">
+          <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600)">Coordenador responsável</div>
+          <div style="font-size:16px;margin-top:4px">{{ coordenadorOut }}</div>
+        </div>
+        <div style="padding-left:16px;border-left:2px solid var(--color-divider)">
+          <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600)">Ocorrências</div>
+          <div style="font-size:16px;margin-top:4px">{{ totalOcorrencias }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="padding:26px 0 22px;border-bottom:2px solid var(--color-divider)">
+      <h3 style="font-size:13px;letter-spacing:.1em;text-transform:uppercase;margin:0 0 12px">Integrantes</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        <sc-for list="{{ integrantesOut }}" as="nome" hint-placeholder-count="3">
+          <span class="tag tag-outline">{{ nome }}</span>
+        </sc-for>
+      </div>
+      <h3 style="font-size:13px;letter-spacing:.1em;text-transform:uppercase;margin:24px 0 12px">Faltas — {{ totalFaltas }}</h3>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <sc-for list="{{ faltasOut }}" as="f" hint-placeholder-count="1">
+          <div style="display:flex;gap:12px;font-size:15px;border-top:1px solid var(--color-neutral-300);padding-top:8px">
+            <span style="min-width:220px">{{ f.nome }}</span>
+            <span style="color:var(--color-neutral-700)">{{ f.motivo }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <sc-if value="{{ semFaltas }}" hint-placeholder-val="{{ false }}">
+        <p style="font-size:15px;color:var(--color-neutral-700);margin:0">Nenhuma falta registrada.</p>
+      </sc-if>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:2px solid var(--color-divider)">
+      <div style="padding:26px 28px 26px 0;border-right:2px solid var(--color-divider)">
+        <h3 style="font-size:13px;letter-spacing:.1em;text-transform:uppercase;margin:0 0 14px">Demandas do dia</h3>
+        <sc-for list="{{ diaOut }}" as="d" hint-placeholder-count="3">
+          <div style="display:flex;gap:12px;padding:10px 0;border-top:1px solid var(--color-neutral-300)">
+            <div style="font-size:12px;color:var(--color-accent);min-width:20px;padding-top:2px">{{ d.n }}</div>
+            <div style="font-size:15px;text-wrap:pretty">{{ d.texto }}</div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="padding:26px 0 26px 28px">
+        <h3 style="font-size:13px;letter-spacing:.1em;text-transform:uppercase;margin:0 0 14px">Para o próximo plantão</h3>
+        <sc-for list="{{ proximoOut }}" as="d" hint-placeholder-count="3">
+          <div style="display:flex;gap:12px;padding:10px 0;border-top:1px solid var(--color-neutral-300)">
+            <div style="font-size:12px;color:var(--color-accent);min-width:20px;padding-top:2px">{{ d.n }}</div>
+            <div style="font-size:15px;text-wrap:pretty">{{ d.texto }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="padding:26px 0 0">
+      <h3 style="font-size:13px;letter-spacing:.1em;text-transform:uppercase;margin:0 0 14px">Ocorrências</h3>
+      <table class="table">
+        <thead>
+          <tr><th style="width:90px">Hora</th><th style="width:110px">Gravidade</th><th>Registro</th></tr>
+        </thead>
+        <tbody>
+          <sc-for list="{{ ocorrenciasOut }}" as="oc" hint-placeholder-count="2">
+            <tr>
+              <td>{{ oc.hora }}</td>
+              <td>{{ oc.gravidade }}</td>
+              <td style="text-wrap:pretty">{{ oc.texto }}</td>
+            </tr>
+          </sc-for>
+        </tbody>
+      </table>
+      <sc-if value="{{ semOcorrencias }}" hint-placeholder-val="{{ false }}">
+        <p style="font-size:15px;color:var(--color-neutral-700);margin:12px 0 0">Nenhuma ocorrência registrada neste plantão.</p>
+      </sc-if>
+    </div>
+
+    <div style="margin-top:56px;display:grid;grid-template-columns:1fr 1fr;gap:48px">
+      <div style="border-top:2px solid var(--color-divider);padding-top:10px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-700)">Coordenador responsável</div>
+      <div style="border-top:2px solid var(--color-divider);padding-top:10px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-700)">Recebido pelo plantão seguinte</div>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ mostrarConsolidado }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1180px;margin:0 auto;padding:40px 24px 96px">
+    <div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:24px;border-bottom:2px solid var(--color-divider);padding-bottom:20px">
+      <div>
+        <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--color-accent)">Relatório consolidado</div>
+        <h1 style="font-size:44px;margin:10px 0 6px">{{ tituloPeriodo }}</h1>
+        <div style="font-size:14px;color:var(--color-neutral-700)">{{ intervaloPeriodo }}</div>
+      </div>
+      <div class="no-print" style="display:flex;flex-wrap:wrap;column-gap:12px;row-gap:12px;align-items:flex-end">
+        <div class="seg">
+          <label class="seg-opt"><input type="radio" name="periodo" checked="{{ periodoSemana }}" onChange="{{ setSemana }}">Semanal</label>
+          <label class="seg-opt"><input type="radio" name="periodo" checked="{{ periodoMes }}" onChange="{{ setMes }}">Mensal</label>
+        </div>
+        <div class="seg">
+          <label class="seg-opt"><input type="radio" name="filtro-turno" checked="{{ filtroTodos }}" onChange="{{ setFiltroTodos }}">Todos</label>
+          <label class="seg-opt"><input type="radio" name="filtro-turno" checked="{{ filtroDiurno }}" onChange="{{ setFiltroDiurno }}">Diurno</label>
+          <label class="seg-opt"><input type="radio" name="filtro-turno" checked="{{ filtroNoturno }}" onChange="{{ setFiltroNoturno }}">Noturno</label>
+        </div>
+        <div class="field" style="margin:0;min-width:190px">
+          <label>Equipe</label>
+          <select class="input" value="{{ filtroEquipe }}" onChange="{{ setFiltroEquipe }}">
+            <sc-for list="{{ equipesDisponiveis }}" as="eq" hint-placeholder-count="3">
+              <option value="{{ eq }}">{{ eq }}</option>
+            </sc-for>
+          </select>
+        </div>
+        <div class="field" style="margin:0">
+          <label>Data de referência</label>
+          <input class="input" type="date" value="{{ refData }}" onChange="{{ setRefData }}">
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);border-bottom:2px solid var(--color-divider)">
+      <sc-for list="{{ indicadores }}" as="ind" hint-placeholder-count="5">
+        <div style="padding:22px 18px 22px 0;border-left:2px solid var(--color-divider)">
+          <div style="font-size:36px;line-height:1;font-family:var(--font-heading);font-weight:800;padding-left:18px">{{ ind.valor }}</div>
+          <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-700);margin-top:8px;padding-left:18px">{{ ind.rotulo }}</div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="padding:26px 0;border-bottom:2px solid var(--color-divider)">
+      <h3 style="font-size:13px;letter-spacing:.1em;text-transform:uppercase;margin:0 0 14px">Plantões do período</h3>
+      <table class="table">
+        <thead>
+          <tr><th style="width:110px">Data</th><th style="width:100px">Turno</th><th>Equipe</th><th>Coordenador</th><th style="width:90px">Demandas</th><th style="width:90px">Pendências</th><th style="width:90px">Ocorr.</th><th style="width:80px">Faltas</th></tr>
+        </thead>
+        <tbody>
+          <sc-for list="{{ linhasPeriodo }}" as="r" hint-placeholder-count="3">
+            <tr>
+              <td>{{ r.data }}</td>
+              <td>{{ r.turno }}</td>
+              <td>{{ r.equipe }}</td>
+              <td>{{ r.coordenador }}</td>
+              <td>{{ r.demandas }}</td>
+              <td>{{ r.pendencias }}</td>
+              <td>{{ r.ocorrencias }}</td>
+              <td>{{ r.faltas }}</td>
+            </tr>
+          </sc-for>
+        </tbody>
+      </table>
+      <sc-if value="{{ periodoVazio }}" hint-placeholder-val="{{ false }}">
+        <p style="font-size:15px;color:var(--color-neutral-700);margin:14px 0 0">Nenhum plantão salvo neste período. Preencha o formulário e use “Salvar plantão”.</p>
+      </sc-if>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:2px solid var(--color-divider)">
+      <div style="padding:26px 28px 26px 0;border-right:2px solid var(--color-divider)">
+        <h3 style="font-size:13px;letter-spacing:.1em;text-transform:uppercase;margin:0 0 14px">Ocorrências do período</h3>
+        <sc-for list="{{ ocorrenciasPeriodo }}" as="oc" hint-placeholder-count="3">
+          <div style="padding:10px 0;border-top:1px solid var(--color-neutral-300)">
+            <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-accent)">{{ oc.meta }}</div>
+            <div style="font-size:15px;text-wrap:pretty;margin-top:4px">{{ oc.texto }}</div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="padding:26px 0 26px 28px">
+        <h3 style="font-size:13px;letter-spacing:.1em;text-transform:uppercase;margin:0 0 14px">Pendências em aberto</h3>
+        <sc-for list="{{ pendenciasPeriodo }}" as="p" hint-placeholder-count="3">
+          <div style="padding:10px 0;border-top:1px solid var(--color-neutral-300)">
+            <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-600)">{{ p.meta }}</div>
+            <div style="font-size:15px;text-wrap:pretty;margin-top:4px">{{ p.texto }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="padding:26px 0 0">
+      <h3 style="font-size:13px;letter-spacing:.1em;text-transform:uppercase;margin:0 0 14px">Faltas do período</h3>
+      <table class="table">
+        <thead><tr><th style="width:130px">Data</th><th>Nome</th><th>Justificativa</th></tr></thead>
+        <tbody>
+          <sc-for list="{{ faltasPeriodo }}" as="f" hint-placeholder-count="2">
+            <tr><td>{{ f.data }}</td><td>{{ f.nome }}</td><td>{{ f.motivo }}</td></tr>
+          </sc-for>
+        </tbody>
+      </table>
+      <sc-if value="{{ semFaltasPeriodo }}" hint-placeholder-val="{{ false }}">
+        <p style="font-size:15px;color:var(--color-neutral-700);margin:14px 0 0">Nenhuma falta no período.</p>
+      </sc-if>
+    </div>
+
+    <div class="no-print" style="margin-top:40px;display:flex;gap:12px">
+      <button class="btn btn-secondary" onClick="{{ exportarCsv }}">Exportar CSV</button>
+      <button class="btn btn-ghost" onClick="{{ limparHistorico }}">Apagar histórico</button>
+    </div>
+  </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{}">
+const CHAVE = 'plantao-relatorio-v1';
+const CHAVE_HIST = 'plantao-registros-v1';
+const CHAVE_USERS = 'plantao-usuarios-v1';
+const CHAVE_SESSAO = 'plantao-sessao-v1';
+const MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+
+const dia = iso => {
+  const [a, m, d] = (iso || '').split('-').map(Number);
+  return new Date(a || 1970, (m || 1) - 1, d || 1);
+};
+const curto = iso => {
+  const [a, m, d] = (iso || '').split('-');
+  return d ? `${d}/${m}/${a.slice(2)}` : '—';
+};
+
+class Component extends DCLogic {
+  state = {
+    vista: 'form',
+    data: new Date().toISOString().slice(0, 10),
+    turno: 'Diurno',
+    equipe: '',
+    coordenador: '',
+    integrantes: [''],
+    faltas: [{ nome: '', motivo: '' }],
+    dia: [''],
+    proximo: [''],
+    ocorrencias: [{ hora: '', gravidade: 'Baixa', texto: '' }],
+    registros: [],
+    usuarios: [],
+    sessao: null,
+    aba: 'entrar',
+    authEmail: '',
+    authSenha: '',
+    authNome: '',
+    authEquipe: '',
+    authPerfil: 'Supervisor',
+    erroAuth: '',
+    periodo: 'semana',
+    filtroTurno: 'Todos',
+    refData: new Date().toISOString().slice(0, 10),
+    salvoAgora: false
+  };
+
+  componentDidMount() {
+    try {
+      const bruto = localStorage.getItem(CHAVE);
+      if (bruto) this.setState(JSON.parse(bruto));
+      const hist = localStorage.getItem(CHAVE_HIST);
+      if (hist) this.setState({ registros: JSON.parse(hist) });
+      const us = localStorage.getItem(CHAVE_USERS);
+      const usuarios = us ? JSON.parse(us) : [];
+      const email = localStorage.getItem(CHAVE_SESSAO);
+      const sessao = usuarios.find(u => u.email === email) || null;
+      this.setState({ usuarios, sessao, aba: usuarios.length ? 'entrar' : 'cadastro' });
+    } catch (e) {}
+  }
+
+  gravarUsuarios(usuarios) {
+    this.setState({ usuarios });
+    try { localStorage.setItem(CHAVE_USERS, JSON.stringify(usuarios)); } catch (e) {}
+  }
+
+  abrirSessao(u) {
+    const patch = { sessao: u, vista: 'form', authSenha: '', erroAuth: '' };
+    if (!this.state.equipe.trim() && u.equipe) patch.equipe = u.equipe;
+    if (!this.state.coordenador.trim() && u.perfil === 'Chefia') patch.coordenador = u.nome;
+    this.setState(patch);
+    try { localStorage.setItem(CHAVE_SESSAO, u.email); } catch (e) {}
+  }
+
+  gravarHistorico(registros) {
+    this.setState({ registros });
+    try { localStorage.setItem(CHAVE_HIST, JSON.stringify(registros)); } catch (e) {}
+  }
+
+  janela() {
+    const ref = dia(this.state.refData);
+    if (this.state.periodo === 'mes') {
+      return [new Date(ref.getFullYear(), ref.getMonth(), 1), new Date(ref.getFullYear(), ref.getMonth() + 1, 0)];
+    }
+    const ini = new Date(ref);
+    ini.setDate(ref.getDate() - ((ref.getDay() + 6) % 7));
+    const fim = new Date(ini);
+    fim.setDate(ini.getDate() + 6);
+    return [ini, fim];
+  }
+
+  salvar(patch) {
+    this.setState(patch, () => {
+      const { vista, registros, salvoAgora, ...resto } = this.state;
+      try { localStorage.setItem(CHAVE, JSON.stringify(resto)); } catch (e) {}
+    });
+  }
+
+  campo(nome) {
+    return e => this.salvar({ [nome]: e.target.value });
+  }
+
+  lista(nome) {
+    const arr = this.state[nome];
+    return arr.map((v, i) => ({
+      value: v,
+      n: String(i + 1).padStart(2, '0'),
+      onChange: e => {
+        const copia = arr.slice();
+        copia[i] = e.target.value;
+        this.salvar({ [nome]: copia });
+      },
+      onRemove: () => this.salvar({ [nome]: arr.filter((_, j) => j !== i) })
+    }));
+  }
+
+  add(nome, valor) {
+    return () => this.salvar({ [nome]: this.state[nome].concat([valor]) });
+  }
+
+  dataLonga() {
+    const d = this.state.data;
+    if (!d) return 'Data não informada';
+    const [a, m, dd] = d.split('-');
+    const meses = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+    return `${dd} de ${meses[Number(m) - 1]} de ${a}`;
+  }
+
+  renderVals() {
+    const s = this.state;
+    const limpos = arr => arr.map(t => t.trim()).filter(Boolean);
+    const numerar = arr => limpos(arr).map((texto, i) => ({ texto, n: String(i + 1).padStart(2, '0') }));
+    const ocs = s.ocorrencias.filter(o => (o.texto || '').trim());
+    const fal = (s.faltas || []).filter(f => (f.nome || '').trim());
+    const [ini, fim] = this.janela();
+    const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const iniIso = iso(ini);
+    const fimIso = iso(fim);
+    const chefe = !!s.sessao && s.sessao.perfil === 'Chefia';
+    const ft = s.filtroTurno || 'Todos';
+    const fe = s.filtroEquipe || 'Todas as equipes';
+    const doPeriodo = (s.registros || [])
+      .filter(r => r.data >= iniIso && r.data <= fimIso)
+      .filter(r => ft === 'Todos' || r.turno === ft)
+      .filter(r => fe === 'Todas as equipes' || (r.equipe || '—') === fe);
+    const equipes = Array.from(new Set((s.registros || []).map(r => (r.equipe || '').trim()).filter(Boolean))).sort();
+    const ocsPeriodo = doPeriodo.flatMap(r => (r.ocorrencias || []).map(o => ({ ...o, data: r.data, turno: r.turno })));
+    const faltasP = doPeriodo.flatMap(r => (r.faltas || []).map(f => ({ ...f, data: r.data })));
+
+    return {
+      logado: !!s.sessao,
+      mostrarAuth: !s.sessao,
+      usuarioNome: s.sessao ? s.sessao.nome : '',
+      usuarioPerfil: s.sessao ? `${s.sessao.perfil}${s.sessao.equipe ? ` · ${s.sessao.equipe}` : ''}` : '',
+      podeConsolidado: chefe,
+      sair: () => {
+        this.setState({ sessao: null, authSenha: '', aba: 'entrar', vista: 'form' });
+        try { localStorage.removeItem(CHAVE_SESSAO); } catch (e) {}
+      },
+      abaEntrar: s.aba === 'entrar',
+      abaCadastro: s.aba === 'cadastro',
+      setAbaEntrar: () => this.setState({ aba: 'entrar', erroAuth: '' }),
+      setAbaCadastro: () => this.setState({ aba: 'cadastro', erroAuth: '' }),
+      trocarAba: () => this.setState({ aba: s.aba === 'entrar' ? 'cadastro' : 'entrar', erroAuth: '' }),
+      rotuloTrocar: s.aba === 'entrar' ? 'Não tenho conta' : 'Já tenho conta',
+      temContas: (s.usuarios || []).length > 0,
+      tituloAuth: s.aba === 'entrar' ? 'Entrar no sistema' : 'Cadastrar acesso',
+      subAuth: s.aba === 'entrar'
+        ? 'Use o e-mail cadastrado pela chefia do seu plantão.'
+        : 'O perfil define o que você pode ver e imprimir.',
+      rotuloAuth: s.aba === 'entrar' ? 'Entrar' : 'Criar acesso',
+      authEmail: s.authEmail,
+      setAuthEmail: e => this.setState({ authEmail: e.target.value }),
+      authSenha: s.authSenha,
+      setAuthSenha: e => this.setState({ authSenha: e.target.value }),
+      authNome: s.authNome,
+      setAuthNome: e => this.setState({ authNome: e.target.value }),
+      authEquipe: s.authEquipe,
+      setAuthEquipe: e => this.setState({ authEquipe: e.target.value }),
+      perfilSupervisor: s.authPerfil === 'Supervisor',
+      perfilChefe: s.authPerfil === 'Chefia',
+      setPerfilSupervisor: () => this.setState({ authPerfil: 'Supervisor' }),
+      setPerfilChefe: () => this.setState({ authPerfil: 'Chefia' }),
+      notaPerfil: s.authPerfil === 'Supervisor'
+        ? 'Supervisor: registra e imprime apenas o relatório do seu plantão.'
+        : 'Chefia: acesso a todos os plantões, consolidado semanal e mensal.',
+      erroAuth: s.erroAuth,
+      temErro: !!s.erroAuth,
+      enviarAuth: () => {
+        const email = s.authEmail.trim().toLowerCase();
+        const senha = s.authSenha;
+        if (!email || !senha) return this.setState({ erroAuth: 'Informe e-mail e senha.' });
+        if (s.aba === 'entrar') {
+          const u = (s.usuarios || []).find(x => x.email === email);
+          if (!u || u.senha !== senha) return this.setState({ erroAuth: 'E-mail ou senha inválidos.' });
+          return this.abrirSessao(u);
+        }
+        if (!s.authNome.trim()) return this.setState({ erroAuth: 'Informe o nome completo.' });
+        if (senha.length < 6) return this.setState({ erroAuth: 'A senha precisa de ao menos 6 caracteres.' });
+        if ((s.usuarios || []).some(x => x.email === email)) return this.setState({ erroAuth: 'Já existe conta com este e-mail.' });
+        const novo = { email, senha, nome: s.authNome.trim(), equipe: s.authEquipe.trim(), perfil: 'Supervisor' };
+        this.gravarUsuarios((s.usuarios || []).concat([novo]));
+        this.abrirSessao(novo);
+      },
+
+      mostrarForm: !!s.sessao && s.vista === 'form',
+      mostrarRelatorio: !!s.sessao && s.vista === 'relatorio',
+      mostrarConsolidado: !!s.sessao && chefe && s.vista === 'consolidado',
+      rotuloVista: s.vista === 'form' ? 'Gerar relatório' : 'Voltar à edição',
+      alternarVista: () => this.setState({ vista: s.vista === 'form' ? 'relatorio' : 'form' }),
+      verConsolidado: () => { if (chefe) this.setState({ vista: s.vista === 'consolidado' ? 'form' : 'consolidado' }); },
+      rotuloSalvar: s.salvoAgora ? 'Plantão salvo ✓' : 'Salvar plantão',
+      salvarPlantao: () => {
+        const registro = {
+          id: `${s.data}-${s.turno}-${s.equipe.trim().toLowerCase()}`,
+          data: s.data, turno: s.turno, equipe: s.equipe.trim(), coordenador: s.coordenador.trim(),
+          autor: s.sessao ? s.sessao.nome : '', autorEmail: s.sessao ? s.sessao.email : '',
+          integrantes: limpos(s.integrantes),
+          faltas: fal.map(f => ({ nome: f.nome.trim(), motivo: (f.motivo || '').trim() })),
+          dia: limpos(s.dia), proximo: limpos(s.proximo),
+          ocorrencias: ocs.map(o => ({ hora: o.hora, gravidade: o.gravidade, texto: o.texto.trim() }))
+        };
+        const outros = (s.registros || []).filter(r => r.id !== registro.id);
+        this.gravarHistorico(outros.concat([registro]).sort((a, b) => (a.data < b.data ? -1 : 1)));
+        this.setState({ salvoAgora: true });
+        setTimeout(() => this.setState({ salvoAgora: false }), 2200);
+      },
+      limparHistorico: () => {
+        if (!window.confirm('Apagar todos os plantões salvos no histórico?')) return;
+        this.gravarHistorico([]);
+      },
+      periodoSemana: s.periodo === 'semana',
+      periodoMes: s.periodo === 'mes',
+      setSemana: () => this.setState({ periodo: 'semana' }),
+      setMes: () => this.setState({ periodo: 'mes' }),
+      refData: s.refData,
+      setRefData: e => this.setState({ refData: e.target.value }),
+      filtroEquipe: fe,
+      equipesDisponiveis: ['Todas as equipes'].concat(equipes),
+      setFiltroEquipe: e => this.setState({ filtroEquipe: e.target.value }),
+      filtroTodos: ft === 'Todos',
+      filtroDiurno: ft === 'Diurno',
+      filtroNoturno: ft === 'Noturno',
+      setFiltroTodos: () => this.setState({ filtroTurno: 'Todos' }),
+      setFiltroDiurno: () => this.setState({ filtroTurno: 'Diurno' }),
+      setFiltroNoturno: () => this.setState({ filtroTurno: 'Noturno' }),
+      tituloPeriodo: s.periodo === 'mes'
+        ? `${MESES[dia(s.refData).getMonth()]} de ${dia(s.refData).getFullYear()}`.replace(/^./, c => c.toUpperCase())
+        : 'Semana operacional',
+      intervaloPeriodo: `${curto(iniIso)} — ${curto(fimIso)} · ${ft === 'Todos' ? 'todos os turnos' : `turno ${ft.toLowerCase()}`} · ${fe.toLowerCase()} · ${doPeriodo.length} plantão(ões)`,
+      indicadores: [
+        { valor: String(doPeriodo.length).padStart(2, '0'), rotulo: 'Plantões' },
+        { valor: String(doPeriodo.filter(r => r.turno === 'Diurno').length).padStart(2, '0'), rotulo: 'Diurnos' },
+        { valor: String(doPeriodo.filter(r => r.turno === 'Noturno').length).padStart(2, '0'), rotulo: 'Noturnos' },
+        { valor: String(ocsPeriodo.length).padStart(2, '0'), rotulo: 'Ocorrências' },
+        { valor: String(faltasP.length).padStart(2, '0'), rotulo: 'Faltas' }
+      ],
+      linhasPeriodo: doPeriodo.map(r => ({
+        data: curto(r.data), turno: r.turno,
+        equipe: r.equipe || '—', coordenador: r.coordenador || '—',
+        demandas: String((r.dia || []).length).padStart(2, '0'),
+        pendencias: String((r.proximo || []).length).padStart(2, '0'),
+        ocorrencias: String((r.ocorrencias || []).length).padStart(2, '0'),
+        faltas: String((r.faltas || []).length).padStart(2, '0')
+      })),
+      periodoVazio: doPeriodo.length === 0,
+      ocorrenciasPeriodo: ocsPeriodo.map(o => ({
+        meta: `${curto(o.data)} · ${o.turno} · ${o.hora || 'sem hora'} · gravidade ${o.gravidade.toLowerCase()}`,
+        texto: o.texto
+      })),
+      pendenciasPeriodo: doPeriodo.flatMap(r => (r.proximo || []).map(t => ({
+        meta: `${curto(r.data)} · ${r.turno} · ${r.equipe || 'equipe não informada'}`,
+        texto: t
+      }))),
+      faltasPeriodo: faltasP.map(f => ({ data: curto(f.data), nome: f.nome, motivo: f.motivo || 'Sem justificativa' })),
+      semFaltasPeriodo: faltasP.length === 0,
+      exportarCsv: () => {
+        const cab = ['data','turno','equipe','coordenador','integrantes','faltas','demandas_do_dia','proximo_plantao','ocorrencias'];
+        const esc = v => `"${String(v).replace(/"/g, '""')}"`;
+        const linhas = doPeriodo.map(r => [
+          r.data, r.turno, r.equipe, r.coordenador,
+          (r.integrantes || []).join(' | '),
+          (r.faltas || []).map(f => `${f.nome}${f.motivo ? ` (${f.motivo})` : ''}`).join(' | '),
+          (r.dia || []).join(' | '),
+          (r.proximo || []).join(' | '),
+          (r.ocorrencias || []).map(o => `${o.hora || '--'} [${o.gravidade}] ${o.texto}`).join(' | ')
+        ].map(esc).join(','));
+        const csv = '\ufeff' + [cab.join(','), ...linhas].join('\n');
+        const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `plantoes-${iniIso}-a-${fimIso}.csv`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      },
+      imprimir: () => { this.setState({ vista: 'relatorio' }, () => setTimeout(() => window.print(), 120)); },
+      limpar: () => {
+        if (!window.confirm('Apagar todos os dados deste plantão?')) return;
+        this.salvar({
+          equipe: '', coordenador: '', integrantes: [''], faltas: [{ nome: '', motivo: '' }], dia: [''], proximo: [''],
+          ocorrencias: [{ hora: '', gravidade: 'Baixa', texto: '' }]
+        });
+      },
+
+      data: s.data,
+      setData: this.campo('data'),
+      turnoDiurno: s.turno === 'Diurno',
+      turnoNoturno: s.turno === 'Noturno',
+      setDiurno: () => this.salvar({ turno: 'Diurno' }),
+      setNoturno: () => this.salvar({ turno: 'Noturno' }),
+      equipe: s.equipe,
+      setEquipe: this.campo('equipe'),
+      coordenador: s.coordenador,
+      setCoordenador: this.campo('coordenador'),
+
+      integrantes: this.lista('integrantes'),
+      addIntegrante: this.add('integrantes', ''),
+      faltas: (s.faltas || []).map((f, i) => {
+        const lista = s.faltas || [];
+        const troca = (chave, valor) => this.salvar({ faltas: lista.map((x, j) => (j === i ? { ...x, [chave]: valor } : x)) });
+        return {
+          nome: f.nome, motivo: f.motivo,
+          onNome: e => troca('nome', e.target.value),
+          onMotivo: e => troca('motivo', e.target.value),
+          onRemove: () => this.salvar({ faltas: lista.filter((_, j) => j !== i) })
+        };
+      }),
+      addFalta: () => this.salvar({ faltas: (s.faltas || []).concat([{ nome: '', motivo: '' }]) }),
+      demandasDia: this.lista('dia'),
+      addDia: this.add('dia', ''),
+      demandasProximo: this.lista('proximo'),
+      addProximo: this.add('proximo', ''),
+
+      ocorrencias: s.ocorrencias.map((o, i) => {
+        const troca = (chave, valor) => {
+          const copia = s.ocorrencias.map((x, j) => (j === i ? { ...x, [chave]: valor } : x));
+          this.salvar({ ocorrencias: copia });
+        };
+        return {
+          hora: o.hora, gravidade: o.gravidade, texto: o.texto,
+          onHora: e => troca('hora', e.target.value),
+          onGravidade: e => troca('gravidade', e.target.value),
+          onTexto: e => troca('texto', e.target.value),
+          onRemove: () => this.salvar({ ocorrencias: s.ocorrencias.filter((_, j) => j !== i) })
+        };
+      }),
+      addOcorrencia: this.add('ocorrencias', { hora: '', gravidade: 'Baixa', texto: '' }),
+
+      tituloRelatorio: `Plantão ${s.turno.toLowerCase()} — ${this.dataLonga()}`,
+      equipeOut: s.equipe.trim() || '—',
+      coordenadorOut: s.coordenador.trim() || '—',
+      integrantesOut: limpos(s.integrantes),
+      faltasOut: fal.map(f => ({ nome: f.nome.trim(), motivo: (f.motivo || '').trim() || 'Sem justificativa' })),
+      totalFaltas: String(fal.length).padStart(2, '0'),
+      semFaltas: fal.length === 0,
+      diaOut: numerar(s.dia),
+      proximoOut: numerar(s.proximo),
+      ocorrenciasOut: ocs.map(o => ({
+        hora: o.hora || '—',
+        gravidade: o.gravidade,
+        texto: o.texto.trim()
+      })),
+      totalOcorrencias: String(ocs.length).padStart(2, '0'),
+      semOcorrencias: ocs.length === 0
+    };
+  }
+}
+</script>
+</body>
+</html>

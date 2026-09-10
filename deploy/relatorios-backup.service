@@ -1,0 +1,16 @@
+[Unit]
+Description=Backup consistente do banco de relatorios
+
+[Service]
+Type=oneshot
+User=relatorios
+Group=relatorios
+WorkingDirectory=/opt/relatorios
+EnvironmentFile=/etc/relatorios.env
+UMask=0077
+ExecStart=/bin/sh -c '/usr/bin/node /opt/relatorios/backend/manage.cjs backup "/var/backups/relatorios/relatorios-$(date +%%Y%%m%%d-%%H%%M%%S).sqlite"'
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/relatorios /var/backups/relatorios

@@ -1,0 +1,22 @@
+[Unit]
+Description=Sistema de Relatorios - API e banco interno
+After=network.target
+
+[Service]
+Type=simple
+User=relatorios
+Group=relatorios
+WorkingDirectory=/opt/relatorios
+EnvironmentFile=/etc/relatorios.env
+ExecStart=/usr/bin/node /opt/relatorios/backend/server.cjs
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/relatorios
+
+[Install]
+WantedBy=multi-user.target

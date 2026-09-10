@@ -1,1 +1,9 @@
 config.js
+node_modules/
+dist/
+data/
+backups/
+.env
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

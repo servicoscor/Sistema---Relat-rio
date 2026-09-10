@@ -1,0 +1,15 @@
+# Merge into the HTTPS VirtualHost configured by the network team.
+# Keep the existing external port 5000 if that is the intended NAT mapping.
+# Do not create a second conflicting Listen directive or VirtualHost.
+# Apache modules: proxy proxy_http headers ssl
+ProxyPreserveHost On
+ProxyRequests Off
+RequestHeader set X-Forwarded-Proto "https"
+ProxyPass / http://127.0.0.1:3000/ connectiontimeout=5 timeout=30
+ProxyPassReverse / http://127.0.0.1:3000/
+
+# TLS certificate and SSLEngine belong to the enclosing HTTPS VirtualHost.
+# HTTP should redirect to the final HTTPS origin. Never set the forwarded
+# protocol to https in an unencrypted HTTP VirtualHost.
+# Proxy the ENTIRE site, not just /api: the application exposes an explicit
+# list of public files and keeps database, source and credentials private.

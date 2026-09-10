@@ -1,15 +1,11 @@
-const CFG = window.APP_CONFIG || {};
-const sbReady = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && !CFG.SUPABASE_URL.includes('SEU-PROJETO'));
-const supabaseLibReady = !!window.supabase;
-const supabaseClient = sbReady && supabaseLibReady ? window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY) : null;
 const MESES = ['janeiro','fevereiro','marco','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 const state = {
   loading: true, error: '', authMode: 'login', authEmail: '', authPass: '', authName: '', authTeam: '',
   user: null, profile: null, view: 'form', records: [], period: 'semana', filterTurn: 'Todos',
-  filterTeam: 'Todas as equipes', refDate: today(), saved: false, form: emptyForm()
+  filterTeam: 'Todas as equipes', refDate: today(), saved: false, form: emptyForm(), editing:null,dirty:false,saving:false,authBusy:false,recordsLoading:false,recordsError:'',teams:[]
 };
 
-function today(){return new Date().toISOString().slice(0,10)}
+function today(){const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const get=t=>parts.find(p=>p.type===t).value;return `${get('year')}-${get('month')}-${get('day')}`}
 function emptyForm(){return{data:today(),turno:'Diurno',equipe:'',coordenador:'',integrantes:[''],faltas:[{nome:'',motivo:''}],dia:[''],proximo:[''],ocorrencias:[{hora:'',gravidade:'Baixa',texto:''}]}}
 function esc(v){return String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
 function clean(a){return(a||[]).map(x=>String(x).trim()).filter(Boolean)}
@@ -18,81 +14,185 @@ function isoDate(d){return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(
 function shortDate(iso){const[y,m,d]=String(iso||'').split('-');return d?`${d}/${m}/${String(y).slice(2)}`:'-'}
 function longDate(iso){const[y,m,d]=String(iso||'').split('-');return d?`${d} de ${MESES[Number(m)-1]} de ${y}`:'Data nao informada'}
 function isChief(){return state.profile?.perfil === 'Chefia'}
-function setValue(path,value){const p=path.split('.');let t=state;while(p.length>1)t=t[p.shift()];t[p[0]]=value;render()}
-function setForm(path,value){state.form[path]=value;render()}
-function addList(k,v){state.form[k].push(v);render()}
-function removeList(k,i){state.form[k]=state.form[k].filter((_,j)=>j!==i);if(!state.form[k].length)state.form[k].push(k==='ocorrencias'?{hora:'',gravidade:'Baixa',texto:''}:k==='faltas'?{nome:'',motivo:''}:'');render()}
+function setValue(path,value){if(path==='refDate' && (!/^\d{4}-\d{2}-\d{2}$/.test(value)||isoDate(parseDate(value))!==value))return;const p=path.split('.');let t=state;while(p.length>1)t=t[p.shift()];t[p[0]]=value;if(['period','refDate'].includes(path)){state.filterTeam='Todas as equipes';void loadRecords()}render()}
+function setForm(path,value){state.form[path]=value;markDirty();render()}
+function addList(k,v){state.form[k].push(v);markDirty();render()}
+function removeList(k,i){markDirty();state.form[k]=state.form[k].filter((_,j)=>j!==i);if(!state.form[k].length)state.form[k].push(k==='ocorrencias'?{hora:'',gravidade:'Baixa',texto:''}:k==='faltas'?{nome:'',motivo:''}:'');render()}
 
-async function init(){
-  try{
-    if(!sbReady || !supabaseLibReady){state.loading=false;render();return}
-    const {data:{session}} = await supabaseClient.auth.getSession();
-    if(session?.user) await loadUser(session.user);
-    state.loading=false;render();
-    supabaseClient.auth.onAuthStateChange(async(_event,session)=>{state.user=session?.user||null;if(state.user)await loadUser(state.user);else state.profile=null;render()});
-  }catch(err){
-    state.loading=false;
-    state.error=err.message || String(err);
-    render();
+let sessionVersion = 0;
+let recordsVersion = 0;
+
+function resetSession(){
+  sessionVersion++;
+  recordsVersion++;
+  Object.assign(state,{user:null,profile:null,authPass:'',authEmail:'',authName:'',authTeam:'',
+    records:[],form:emptyForm(),view:'form',saved:false,error:'',editing:null,dirty:false,
+    saving:false,authBusy:false,recordsLoading:false,recordsError:'',teams:[],filterTurn:'Todos',
+    filterTeam:'Todas as equipes',period:'semana',refDate:today()});
+}
+
+let csrfToken = '';
+let expiryTimer;
+let serverUnavailable = false;
+const accountChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('plantao-account') : null;
+
+async function api(path,options={}){
+  const version=sessionVersion;
+  let response;
+  try{response=await fetch('/api'+path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken,...options.headers}})}
+  catch(error){throw new Error('Nao foi possivel conectar ao servidor. Tente novamente.')}
+  let data;
+  try{data=await response.json()}catch(error){throw new Error('O servidor do sistema esta indisponivel.')}
+  if(!response.ok){
+    if(response.status===401 && path!=='/login' && version===sessionVersion){resetSession();state.loading=false;state.error='Sua sessao expirou. Entre novamente.';render()}
+    throw new Error(data.error||'Nao foi possivel concluir a operacao.');
   }
+  return data;
 }
 
-async function loadUser(user){
-  state.user=user;
-  const {data,error}=await supabaseClient.from('profiles').select('*').eq('id',user.id).single();
-  if(error){state.error=error.message;return}
-  state.profile=data;
-  if(!state.form.equipe && data.equipe) state.form.equipe=data.equipe;
-  if(!state.form.coordenador && data.perfil==='Chefia') state.form.coordenador=data.nome;
+async function acceptSession(session){
+  csrfToken=session.csrf;
+  clearTimeout(expiryTimer);
+  if(session.user){
+    expiryTimer=setTimeout(()=>{resetSession();state.loading=false;state.error='Sua sessao expirou. Entre novamente.';render();void init()},Math.max(0,session.expires-Date.now()));
+  }
+  if(session.user?.id===state.user?.id && state.profile){state.profile=session.user;state.teams=session.teams;return}
+  resetSession();
+  if(!session.user){state.loading=false;render();return}
+  state.user={id:session.user.id};state.profile=session.user;state.teams=session.teams;
+  state.form.equipe=session.teams[0]||'';
+  if(isChief())state.form.coordenador=session.user.nome;
+  state.loading=true;
+  const version=sessionVersion;
   await loadRecords();
+  if(version===sessionVersion){state.loading=false;render()}
 }
-
+async function init(){
+  const version=sessionVersion;
+  try{
+    const session=await api('/session');
+    if(version!==sessionVersion)return;
+    serverUnavailable=false;await acceptSession(session);
+  }catch(error){if(version===sessionVersion){serverUnavailable=true;state.loading=false;state.error=error.message;render()}}
+}
 async function loadRecords(){
-  const {data,error}=await supabaseClient.from('plantoes').select('*').order('data',{ascending:true});
-  if(error){state.error=error.message;state.records=[];return}
-  state.records=data||[];
+  if(!state.user || !state.profile)return;
+  const session=sessionVersion,request=++recordsVersion;
+  const [start,end]=windowDates().map(isoDate);
+  state.recordsLoading=true;state.recordsError='';state.records=[];
+  const rows=[];
+  try{
+    let offset=0;
+    while(true){
+      const {data,count}=await api(`/reports?start=${start}&end=${end}&offset=${offset}`);
+      if(session!==sessionVersion || request!==recordsVersion)return;
+      if(!Array.isArray(data))throw new Error('Resposta invalida');
+      rows.push(...data);offset+=data.length;
+      if(count!==null && count!==undefined && offset>=count)break;
+      if(!data.length){if(count>offset)throw new Error('Consulta incompleta');break}
+    }
+    state.records=rows;
+  }catch(error){
+    if(session===sessionVersion && request===recordsVersion){state.records=[];state.recordsError='Nao foi possivel carregar o periodo completo. Tente novamente.'}
+  }finally{
+    if(session===sessionVersion && request===recordsVersion){state.recordsLoading=false;render()}
+  }
 }
 
 async function loginOrSignup(){
+  if(state.authBusy)return;
   state.error='';
-  const email=state.authEmail.trim().toLowerCase();
-  if(!email||!state.authPass){state.error='Informe e-mail e senha.';render();return}
-  if(state.authMode==='login'){
-    const {error}=await supabaseClient.auth.signInWithPassword({email,password:state.authPass});
-    if(error) state.error=error.message;
-  }else{
-    if(!state.authName.trim()){state.error='Informe o nome completo.';render();return}
-    const {error}=await supabaseClient.auth.signUp({email,password:state.authPass,options:{data:{nome:state.authName.trim(),equipe:state.authTeam.trim()}}});
-    if(error) state.error=error.message;
-    else state.error='Cadastro criado. Se o Supabase pedir confirmacao, confirme o e-mail antes de entrar.';
-  }
-  render();
+  const email=state.authEmail.trim().toLowerCase(),password=state.authPass;
+  if(!email||!password){state.error='Informe e-mail e senha.';render();return}
+  state.authBusy=true;
+  const version=sessionVersion;
+  try{
+    const session=await api('/login',{method:'POST',body:JSON.stringify({email,password})});
+    if(version!==sessionVersion)return;
+    await acceptSession(session);
+    accountChannel?.postMessage('changed');
+  }catch(error){if(version===sessionVersion)state.error=error.message}
+  finally{state.authPass='';state.authBusy=false;render()}
+}
+async function logout(){
+  if(state.dirty && !confirm('Sair e descartar as alteracoes nao salvas?'))return;
+  resetSession();clearTimeout(expiryTimer);state.loading=false;render();
+  try{
+    await api('/logout',{method:'POST',body:'{}'});
+    csrfToken='';accountChannel?.postMessage('changed');await init();
+  }catch(error){state.error='Nao foi possivel encerrar a sessao. Tente sair novamente antes de compartilhar este computador.';render()}
 }
 
-async function logout(){await supabaseClient.auth.signOut();state.user=null;state.profile=null;state.view='form';render()}
+function recordPayload(){
+  const f=state.form;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(f.data) || isoDate(parseDate(f.data))!==f.data)throw new Error('Informe uma data valida.');
+  if(!['Diurno','Noturno'].includes(f.turno))throw new Error('Informe o turno.');
+  if(!f.equipe.trim())throw new Error('Informe uma equipe autorizada.');
+  if(!isChief() && !state.teams.includes(f.equipe.trim()))throw new Error('Solicite a liberacao desta equipe pela Chefia.');
+  const faltas=(f.faltas||[]).filter(x=>String(x.nome||'').trim());
+  const ocorrencias=(f.ocorrencias||[]).filter(x=>String(x.texto||'').trim());
+  if(ocorrencias.some(o=>!['Baixa','Media','Alta'].includes(o.gravidade) || (o.hora && !/^([01]\d|2[0-3]):[0-5]\d$/.test(o.hora))))throw new Error('Confira horario e gravidade das ocorrencias.');
+  return {data:f.data,turno:f.turno,equipe:f.equipe.trim(),coordenador:f.coordenador.trim(),
+    integrantes:clean(f.integrantes),faltas:faltas.map(x=>({nome:x.nome.trim(),motivo:String(x.motivo||'').trim()})),
+    dia:clean(f.dia),proximo:clean(f.proximo),ocorrencias:ocorrencias.map(o=>({hora:o.hora,gravidade:o.gravidade,texto:o.texto.trim()}))};
+}
 
 async function saveRecord(){
-  const f=state.form, ocs=(f.ocorrencias||[]).filter(o=>String(o.texto||'').trim()), faltas=(f.faltas||[]).filter(x=>String(x.nome||'').trim());
-  const payload={data:f.data,turno:f.turno,equipe:f.equipe.trim(),coordenador:f.coordenador.trim(),integrantes:clean(f.integrantes),faltas:faltas.map(x=>({nome:x.nome.trim(),motivo:String(x.motivo||'').trim()})),dia:clean(f.dia),proximo:clean(f.proximo),ocorrencias:ocs.map(o=>({hora:o.hora,gravidade:o.gravidade,texto:o.texto.trim()})),autor_id:state.user.id};
-  const {error}=await supabaseClient.from('plantoes').upsert(payload,{onConflict:'data,turno,equipe'});
-  if(error){state.error=error.message;render();return}
-  state.saved=true;await loadRecords();render();setTimeout(()=>{state.saved=false;render()},2200);
+  if(!state.user || !state.profile || state.saving)return;
+  const version=sessionVersion;
+  state.saving=true;state.error='';state.saved=false;
+  try{
+    const payload=recordPayload(),snapshot=JSON.stringify(state.form);
+    const data=state.editing
+      ?await api('/reports/'+encodeURIComponent(state.editing.id),{method:'PUT',body:JSON.stringify({...payload,updated_at:state.editing.updated_at})})
+      :await api('/reports',{method:'POST',body:JSON.stringify(payload)});
+    if(version!==sessionVersion)return;
+    state.editing=data;state.dirty=JSON.stringify(state.form)!==snapshot;state.saved=!state.dirty;
+    await loadRecords();
+  }catch(error){if(version===sessionVersion)state.error=error.message}
+  finally{if(version===sessionVersion){state.saving=false;render()}}
 }
 
-function clearForm(){if(confirm('Apagar todos os dados deste plantao?')){state.form=emptyForm();render()}}
-async function clearHistory(){if(!isChief()||!confirm('Apagar todos os plantoes salvos?'))return;const{error}=await supabaseClient.from('plantoes').delete().neq('id','00000000-0000-0000-0000-000000000000');if(error)state.error=error.message;await loadRecords();render()}
+function clearForm(){
+  if(state.saving)return;
+  if(state.dirty && !confirm('Descartar as alteracoes nao salvas?'))return;
+  state.form=emptyForm();state.form.equipe=state.teams[0]||'';
+  state.editing=null;state.dirty=false;state.saved=false;state.error='';state.view='form';render();
+}
+function openRecord(id){
+  if(state.saving)return;
+  const row=state.records.find(r=>r.id===id);if(!row)return;
+  if(state.dirty && !confirm('Descartar as alteracoes nao salvas e abrir este plantao?'))return;
+  state.form=JSON.parse(JSON.stringify(Object.fromEntries(Object.keys(emptyForm()).map(k=>[k,row[k]]))));
+  for(const key of ['integrantes','dia','proximo'])if(!state.form[key].length)state.form[key]=[''];
+  if(!state.form.faltas.length)state.form.faltas=[{nome:'',motivo:''}];
+  if(!state.form.ocorrencias.length)state.form.ocorrencias=[{hora:'',gravidade:'Baixa',texto:''}];
+  state.editing={id:row.id,updated_at:row.updated_at};state.dirty=false;state.saved=false;state.error='';state.view='form';render();
+}
+function markDirty(){state.dirty=true;state.saved=false;const button=document.getElementById('save-record');if(button && !state.saving)button.textContent='Salvar plantao'}
+function csvCell(value){
+  let text=String(value??'');
+  if(/^[\s\uFEFF]*[=+@\-\uFF1D\uFF0B\uFF20\uFF0D]/u.test(text)||/^[\t\r\n]/.test(text))text="'"+text;
+  return '"'+text.replace(/"/g,'""')+'"';
+}
 function windowDates(){const ref=parseDate(state.refDate);if(state.period==='mes')return[new Date(ref.getFullYear(),ref.getMonth(),1),new Date(ref.getFullYear(),ref.getMonth()+1,0)];const s=new Date(ref);s.setDate(ref.getDate()-((ref.getDay()+6)%7));const e=new Date(s);e.setDate(s.getDate()+6);return[s,e]}
 function periodRecords(){const[start,end]=windowDates().map(isoDate);return state.records.filter(r=>r.data>=start&&r.data<=end).filter(r=>state.filterTurn==='Todos'||r.turno===state.filterTurn).filter(r=>state.filterTeam==='Todas as equipes'||(r.equipe||'-')===state.filterTeam)}
-function exportCsv(){const rows=periodRecords(),[start,end]=windowDates().map(isoDate),header=['data','turno','equipe','coordenador','integrantes','faltas','demandas_do_dia','proximo_plantao','ocorrencias'],cell=v=>`"${String(v??'').replace(/"/g,'""')}"`;const lines=rows.map(r=>[r.data,r.turno,r.equipe,r.coordenador,(r.integrantes||[]).join(' | '),(r.faltas||[]).map(f=>`${f.nome}${f.motivo?` (${f.motivo})`:''}`).join(' | '),(r.dia||[]).join(' | '),(r.proximo||[]).join(' | '),(r.ocorrencias||[]).map(o=>`${o.hora||'--'} [${o.gravidade}] ${o.texto}`).join(' | ')].map(cell).join(','));const blob=new Blob(['\ufeff'+[header.join(','),...lines].join('\n')],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`plantoes-${start}-a-${end}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+function exportCsv(){if(!isChief()||state.recordsLoading||state.recordsError)return;const rows=periodRecords(),[start,end]=windowDates().map(isoDate),header=['data','turno','equipe','coordenador','integrantes','faltas','demandas_do_dia','proximo_plantao','ocorrencias'],cell=csvCell;const lines=rows.map(r=>[r.data,r.turno,r.equipe,r.coordenador,(r.integrantes||[]).join(' | '),(r.faltas||[]).map(f=>`${f.nome}${f.motivo?` (${f.motivo})`:''}`).join(' | '),(r.dia||[]).join(' | '),(r.proximo||[]).join(' | '),(r.ocorrencias||[]).map(o=>`${o.hora||'--'} [${o.gravidade}] ${o.texto}`).join(' | ')].map(cell).join(','));const blob=new Blob(['\ufeff'+[header.join(','),...lines].join('\n')],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`plantoes-${start}-a-${end}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 
-function setupView(){return`<main class="wrap"><section class="section"><h1>Configurar Supabase</h1>${!supabaseLibReady?'<p class="error">A biblioteca do Supabase nao carregou. Verifique se o arquivo supabase-js.min.js foi publicado corretamente.</p>':''}${!sbReady?'<p class="error">O arquivo <strong>config.js</strong> ainda nao foi configurado.</p>':''}<p>Crie uma copia de <strong>config.example.js</strong> chamada <strong>config.js</strong> e preencha <strong>SUPABASE_URL</strong> e <strong>SUPABASE_ANON_KEY</strong>. Depois execute o SQL de <strong>supabase/schema.sql</strong> no painel do Supabase.</p></section></main>`}
-function authView(){return`<main class="login"><div class="login-visual"></div><section class="login-panel"><div class="login-card"><div class="seg"><label><input type="radio" name="auth" ${state.authMode==='login'?'checked':''} onchange="setValue('authMode','login')">Entrar</label><label><input type="radio" name="auth" ${state.authMode==='signup'?'checked':''} onchange="setValue('authMode','signup')">Criar conta</label></div><h1 style="font-size:34px;margin:26px 0 8px">${state.authMode==='login'?'Entrar no sistema':'Cadastrar acesso'}</h1><p class="hint">${state.authMode==='login'?'Use o e-mail cadastrado no Supabase.':'O perfil sera aplicado pelo banco conforme as regras de acesso.'}</p><div class="field"><label>E-mail funcional</label><input type="email" value="${esc(state.authEmail)}" oninput="state.authEmail=this.value"></div>${state.authMode==='signup'?`<div class="grid2"><div class="field"><label>Nome completo</label><input value="${esc(state.authName)}" oninput="state.authName=this.value"></div><div class="field"><label>Equipe</label><input value="${esc(state.authTeam)}" oninput="state.authTeam=this.value"></div></div>`:''}<div class="field"><label>Senha</label><input type="password" value="${esc(state.authPass)}" oninput="state.authPass=this.value"></div>${state.error?`<p class="${state.error.includes('criado')?'hint':'error'}">${esc(state.error)}</p>`:''}<button class="primary" onclick="loginOrSignup()">${state.authMode==='login'?'Entrar':'Criar acesso'}</button></div></section></main>`}
-function topbar(){return`<nav class="topbar no-print"><div class="brand">Relatorio de Plantao</div><div class="userbox"><strong>${esc(state.profile.nome)}</strong>${esc(state.profile.perfil)}${state.profile.equipe?' - '+esc(state.profile.equipe):''}</div><button onclick="clearForm()">Limpar</button>${isChief()?`<button onclick="state.view='consolidado';render()">Consolidado</button>`:''}<button onclick="logout()">Sair</button><button class="secondary" onclick="saveRecord()">${state.saved?'Plantao salvo':'Salvar plantao'}</button><button class="secondary" onclick="state.view='report';render();setTimeout(print,120)">Imprimir / PDF</button><button class="primary" onclick="state.view=state.view==='form'?'report':'form';render()">${state.view==='form'?'Gerar relatorio':'Voltar a edicao'}</button></nav>`}
+function setupView(){return `<main class="wrap"><h1>Conectar ao servidor</h1><p>${esc(state.error||'O servidor do sistema nao respondeu.')}</p><button onclick="init()">Tentar novamente</button></main>`}
+function authView(){return `<main class="login"><div class="login-visual"></div><section class="login-panel"><div class="login-card"><h1>Entrar no sistema</h1><p class="hint">Use a conta fornecida pela administracao. Para obter acesso ou recuperar a senha, procure o responsavel pelo sistema.</p><form onsubmit="event.preventDefault();loginOrSignup()"><div class="field"><label for="login-email">E-mail</label><input id="login-email" type="email" autocomplete="username" required value="${esc(state.authEmail)}" oninput="state.authEmail=this.value"></div><div class="field"><label for="login-password">Senha</label><input id="login-password" type="password" autocomplete="current-password" required maxlength="128" oninput="state.authPass=this.value"></div>${state.error?`<p class="error" role="alert">${esc(state.error)}</p>`:''}<button class="primary" ${state.authBusy?'disabled':''} type="submit">${state.authBusy?'Entrando...':'Entrar'}</button></form>${state.error.includes('encerrar a sessao')?'<button onclick="logout()">Tentar sair novamente</button>':''}</div></section></main>`}
+function topbar(){return`<nav class="topbar no-print"><div class="brand">Relatorio de Plantao</div><div class="userbox"><strong>${esc(state.profile.nome)}</strong>${esc(state.profile.perfil)}${state.profile.equipe?' - '+esc(state.profile.equipe):''}</div><button onclick="clearForm()">Limpar</button><button onclick="state.view='consolidado';render();void loadRecords()">${isChief()?'Consolidado':'Historico'}</button><button onclick="logout()">Sair</button><button id="save-record" class="secondary" ${state.saving?'disabled':''} onclick="saveRecord()">${state.saving?'Salvando...':state.saved?'Plantao salvo':'Salvar plantao'}</button><button class="secondary" onclick="if(state.view!=='consolidado')state.view='report';render();setTimeout(print,120)">Imprimir / PDF</button><button class="primary" onclick="state.view=state.view==='form'?'report':'form';render()">${state.view==='form'?'Gerar relatorio':'Voltar a edicao'}</button></nav>${state.error?`<p class="error no-print" role="alert">${esc(state.error)}</p>`:''}`}
 function listRows(k,p){return state.form[k].map((v,i)=>`<div class="row"><textarea rows="2" placeholder="${p}" oninput="state.form.${k}[${i}]=this.value">${esc(v)}</textarea><button class="danger" onclick="removeList('${k}',${i})">Remover</button></div>`).join('')}
-function formView(){const f=state.form;return`${topbar()}<main class="wrap">${state.error?`<p class="error">${esc(state.error)}</p>`:''}<section class="section grid2"><div><div class="kicker">01 - Identificacao</div><div class="field"><label>Data do plantao</label><input type="date" value="${esc(f.data)}" onchange="setForm('data',this.value)"></div><div class="field"><label>Turno</label><div class="seg"><label><input type="radio" name="turno" ${f.turno==='Diurno'?'checked':''} onchange="setForm('turno','Diurno')">Diurno</label><label><input type="radio" name="turno" ${f.turno==='Noturno'?'checked':''} onchange="setForm('turno','Noturno')">Noturno</label></div></div><div class="field"><label>Equipe</label><input value="${esc(f.equipe)}" oninput="state.form.equipe=this.value"></div><div class="field"><label>Coordenador responsavel</label><input value="${esc(f.coordenador)}" oninput="state.form.coordenador=this.value"></div></div><div><div class="kicker">02 - Integrantes e faltas</div>${(f.integrantes||[]).map((n,i)=>`<div class="row"><input value="${esc(n)}" placeholder="Nome do integrante" oninput="state.form.integrantes[${i}]=this.value"><button class="danger" onclick="removeList('integrantes',${i})">Remover</button></div>`).join('')}<button class="secondary" onclick="addList('integrantes','')">+ Integrante</button><div class="kicker" style="margin-top:24px">Faltas</div>${(f.faltas||[]).map((x,i)=>`<div class="row"><input placeholder="Nome" value="${esc(x.nome)}" oninput="state.form.faltas[${i}].nome=this.value"><input placeholder="Justificativa" value="${esc(x.motivo)}" oninput="state.form.faltas[${i}].motivo=this.value"><button class="danger" onclick="removeList('faltas',${i})">Remover</button></div>`).join('')}<button class="secondary" onclick="addList('faltas',{nome:'',motivo:''})">+ Falta</button></div></section><section class="section grid2"><div><div class="kicker">03 - Demandas do dia</div>${listRows('dia','Descreva a demanda executada')}<button class="secondary" onclick="addList('dia','')">+ Demanda</button></div><div><div class="kicker">04 - Proximo plantao</div>${listRows('proximo','Descreva a pendencia ou repasse')}<button class="secondary" onclick="addList('proximo','')">+ Pendencia</button></div></section><section class="section"><div class="kicker">05 - Ocorrencias</div>${(f.ocorrencias||[]).map((o,i)=>`<div class="row"><input type="time" value="${esc(o.hora)}" onchange="state.form.ocorrencias[${i}].hora=this.value"><select onchange="state.form.ocorrencias[${i}].gravidade=this.value"><option ${o.gravidade==='Baixa'?'selected':''}>Baixa</option><option ${o.gravidade==='Media'?'selected':''}>Media</option><option ${o.gravidade==='Alta'?'selected':''}>Alta</option></select><textarea placeholder="Descricao da ocorrencia e providencias" oninput="state.form.ocorrencias[${i}].texto=this.value">${esc(o.texto)}</textarea><button class="danger" onclick="removeList('ocorrencias',${i})">Remover</button></div>`).join('')}<button class="secondary" onclick="addList('ocorrencias',{hora:'',gravidade:'Baixa',texto:''})">+ Ocorrencia</button></section></main>`}
+function formView(){const f=state.form;return`${topbar()}<main class="wrap"><section class="section grid2"><div><div class="kicker">01 - Identificacao</div><div class="field"><label>Data do plantao</label><input type="date" value="${esc(f.data)}" onchange="setForm('data',this.value)"></div><div class="field"><label>Turno</label><div class="seg"><label><input type="radio" name="turno" ${f.turno==='Diurno'?'checked':''} onchange="setForm('turno','Diurno')">Diurno</label><label><input type="radio" name="turno" ${f.turno==='Noturno'?'checked':''} onchange="setForm('turno','Noturno')">Noturno</label></div></div><div class="field"><label>Equipe</label>${isChief()?`<input maxlength="120" value="${esc(f.equipe)}" oninput="state.form.equipe=this.value">`:`<select onchange="setForm('equipe',this.value)"><option value="">Selecione uma equipe liberada</option>${state.teams.map(t=>`<option value="${esc(t)}" ${f.equipe===t?'selected':''}>${esc(t)}</option>`).join('')}</select>${!state.teams.length?'<p class="hint">Aguarde a liberacao da sua equipe pela Chefia.</p>':''}`}</div><div class="field"><label>Coordenador responsavel</label><input value="${esc(f.coordenador)}" oninput="state.form.coordenador=this.value"></div></div><div><div class="kicker">02 - Integrantes e faltas</div>${(f.integrantes||[]).map((n,i)=>`<div class="row"><input value="${esc(n)}" placeholder="Nome do integrante" oninput="state.form.integrantes[${i}]=this.value"><button class="danger" onclick="removeList('integrantes',${i})">Remover</button></div>`).join('')}<button class="secondary" onclick="addList('integrantes','')">+ Integrante</button><div class="kicker" style="margin-top:24px">Faltas</div>${(f.faltas||[]).map((x,i)=>`<div class="row"><input placeholder="Nome" value="${esc(x.nome)}" oninput="state.form.faltas[${i}].nome=this.value"><input placeholder="Justificativa" value="${esc(x.motivo)}" oninput="state.form.faltas[${i}].motivo=this.value"><button class="danger" onclick="removeList('faltas',${i})">Remover</button></div>`).join('')}<button class="secondary" onclick="addList('faltas',{nome:'',motivo:''})">+ Falta</button></div></section><section class="section grid2"><div><div class="kicker">03 - Demandas do dia</div>${listRows('dia','Descreva a demanda executada')}<button class="secondary" onclick="addList('dia','')">+ Demanda</button></div><div><div class="kicker">04 - Proximo plantao</div>${listRows('proximo','Descreva a pendencia ou repasse')}<button class="secondary" onclick="addList('proximo','')">+ Pendencia</button></div></section><section class="section"><div class="kicker">05 - Ocorrencias</div>${(f.ocorrencias||[]).map((o,i)=>`<div class="row"><input type="time" value="${esc(o.hora)}" onchange="state.form.ocorrencias[${i}].hora=this.value"><select onchange="state.form.ocorrencias[${i}].gravidade=this.value"><option ${o.gravidade==='Baixa'?'selected':''}>Baixa</option><option ${o.gravidade==='Media'?'selected':''}>Media</option><option ${o.gravidade==='Alta'?'selected':''}>Alta</option></select><textarea placeholder="Descricao da ocorrencia e providencias" oninput="state.form.ocorrencias[${i}].texto=this.value">${esc(o.texto)}</textarea><button class="danger" onclick="removeList('ocorrencias',${i})">Remover</button></div>`).join('')}<button class="secondary" onclick="addList('ocorrencias',{hora:'',gravidade:'Baixa',texto:''})">+ Ocorrencia</button></section></main>`}
 function occTable(rows){return rows.length?`<table><thead><tr><th>Hora</th><th>Gravidade</th><th>Registro</th></tr></thead><tbody>${rows.map(o=>`<tr><td>${esc(o.hora||'-')}</td><td>${esc(o.gravidade)}</td><td>${esc(o.texto)}</td></tr>`).join('')}</tbody></table>`:'<p class="hint">Nenhuma ocorrencia registrada neste plantao.</p>'}
 function reportView(){const f=state.form,integrantes=clean(f.integrantes),faltas=(f.faltas||[]).filter(x=>String(x.nome||'').trim()),dia=clean(f.dia),proximo=clean(f.proximo),ocs=(f.ocorrencias||[]).filter(o=>String(o.texto||'').trim());return`${topbar()}<main class="report"><div class="kicker">Relatorio de plantao</div><h1>Plantao ${esc(f.turno.toLowerCase())} - ${esc(longDate(f.data))}</h1><div class="grid3 section"><div><label>Equipe</label>${esc(f.equipe||'-')}</div><div><label>Coordenador responsavel</label>${esc(f.coordenador||'-')}</div><div><label>Ocorrencias</label>${String(ocs.length).padStart(2,'0')}</div></div><section class="section"><h3>Integrantes</h3>${integrantes.length?integrantes.map(x=>`<span class="tag">${esc(x)}</span>`).join(''):'<p class="hint">Nenhum integrante informado.</p>'}<h3 style="margin-top:22px">Faltas - ${String(faltas.length).padStart(2,'0')}</h3>${faltas.length?faltas.map(x=>`<p><strong>${esc(x.nome)}</strong> - ${esc(x.motivo||'Sem justificativa')}</p>`).join(''):'<p class="hint">Nenhuma falta registrada.</p>'}</section><section class="section grid2"><div><h3>Demandas do dia</h3>${dia.length?dia.map((x,i)=>`<p><strong>${String(i+1).padStart(2,'0')}</strong> ${esc(x)}</p>`).join(''):'<p class="hint">Sem demandas registradas.</p>'}</div><div><h3>Para o proximo plantao</h3>${proximo.length?proximo.map((x,i)=>`<p><strong>${String(i+1).padStart(2,'0')}</strong> ${esc(x)}</p>`).join(''):'<p class="hint">Sem pendencias registradas.</p>'}</div></section><section class="section"><h3>Ocorrencias</h3>${occTable(ocs)}</section><section class="section grid2" style="margin-top:40px"><div><label>Coordenador responsavel</label><br><br>________________________________</div><div><label>Recebido pelo plantao seguinte</label><br><br>________________________________</div></section></main>`}
-function consolidatedView(){const rows=periodRecords(),[start,end]=windowDates().map(isoDate),teams=Array.from(new Set(state.records.map(r=>r.equipe).filter(Boolean))).sort(),ocs=rows.flatMap(r=>(r.ocorrencias||[]).map(o=>({...o,data:r.data,turno:r.turno,equipe:r.equipe}))),faltas=rows.flatMap(r=>(r.faltas||[]).map(f=>({...f,data:r.data}))),pend=rows.flatMap(r=>(r.proximo||[]).map(p=>({texto:p,data:r.data,turno:r.turno,equipe:r.equipe})));return`${topbar()}<main class="wrap"><section class="section"><div class="kicker">Relatorio consolidado</div><h1>${state.period==='mes'?`${MESES[parseDate(state.refDate).getMonth()]} de ${parseDate(state.refDate).getFullYear()}`:'Semana operacional'}</h1><p class="hint">${shortDate(start)} a ${shortDate(end)} - ${state.filterTurn.toLowerCase()} - ${state.filterTeam.toLowerCase()}</p><div class="no-print row"><div class="seg"><label><input type="radio" name="period" ${state.period==='semana'?'checked':''} onchange="setValue('period','semana')">Semanal</label><label><input type="radio" name="period" ${state.period==='mes'?'checked':''} onchange="setValue('period','mes')">Mensal</label></div><select onchange="setValue('filterTurn',this.value)"><option>Todos</option><option ${state.filterTurn==='Diurno'?'selected':''}>Diurno</option><option ${state.filterTurn==='Noturno'?'selected':''}>Noturno</option></select><select onchange="setValue('filterTeam',this.value)"><option>Todas as equipes</option>${teams.map(t=>`<option ${state.filterTeam===t?'selected':''}>${esc(t)}</option>`).join('')}</select><input type="date" value="${esc(state.refDate)}" onchange="setValue('refDate',this.value)"></div></section><section class="grid5"><div class="metric"><strong>${String(rows.length).padStart(2,'0')}</strong><span>Plantoes</span></div><div class="metric"><strong>${String(rows.filter(r=>r.turno==='Diurno').length).padStart(2,'0')}</strong><span>Diurnos</span></div><div class="metric"><strong>${String(rows.filter(r=>r.turno==='Noturno').length).padStart(2,'0')}</strong><span>Noturnos</span></div><div class="metric"><strong>${String(ocs.length).padStart(2,'0')}</strong><span>Ocorrencias</span></div><div class="metric"><strong>${String(faltas.length).padStart(2,'0')}</strong><span>Faltas</span></div></section><section class="section"><h3>Plantoes salvos</h3>${rows.length?`<table><thead><tr><th>Data</th><th>Turno</th><th>Equipe</th><th>Coordenador</th><th>Demandas</th><th>Pendencias</th><th>Ocorrencias</th><th>Faltas</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${shortDate(r.data)}</td><td>${esc(r.turno)}</td><td>${esc(r.equipe||'-')}</td><td>${esc(r.coordenador||'-')}</td><td>${(r.dia||[]).length}</td><td>${(r.proximo||[]).length}</td><td>${(r.ocorrencias||[]).length}</td><td>${(r.faltas||[]).length}</td></tr>`).join('')}</tbody></table>`:'<p class="hint">Nenhum plantao salvo neste periodo.</p>'}</section><section class="section grid2"><div><h3>Ocorrencias do periodo</h3>${ocs.length?ocs.map(o=>`<p><strong>${shortDate(o.data)} - ${esc(o.turno)} - ${esc(o.hora||'sem hora')}</strong><br>${esc(o.texto)}</p>`).join(''):'<p class="hint">Sem ocorrencias no periodo.</p>'}</div><div><h3>Pendencias em aberto</h3>${pend.length?pend.map(p=>`<p><strong>${shortDate(p.data)} - ${esc(p.turno)} - ${esc(p.equipe||'-')}</strong><br>${esc(p.texto)}</p>`).join(''):'<p class="hint">Sem pendencias no periodo.</p>'}</div></section><section class="section"><h3>Faltas do periodo</h3>${faltas.length?`<table><thead><tr><th>Data</th><th>Nome</th><th>Justificativa</th></tr></thead><tbody>${faltas.map(f=>`<tr><td>${shortDate(f.data)}</td><td>${esc(f.nome)}</td><td>${esc(f.motivo||'Sem justificativa')}</td></tr>`).join('')}</tbody></table>`:'<p class="hint">Nenhuma falta no periodo.</p>'}<div class="no-print" style="margin-top:24px"><button class="secondary" onclick="exportCsv()">Exportar CSV</button> <button class="danger" onclick="clearHistory()">Apagar historico</button></div></section></main>`}
-function render(){const app=document.getElementById('app');if(state.loading)app.innerHTML='<main class="wrap"><p>Carregando...</p></main>';else if(!sbReady||!supabaseLibReady)app.innerHTML=setupView();else if(!state.user)app.innerHTML=authView();else if(state.view==='report')app.innerHTML=reportView();else if(state.view==='consolidado'&&isChief())app.innerHTML=consolidatedView();else app.innerHTML=formView()}
+function consolidatedView(){if(state.recordsLoading||state.recordsError)return `${topbar()}<main class="wrap"><p>${esc(state.recordsError||'Carregando o periodo completo...')}</p><button onclick="void loadRecords()">Atualizar</button></main>`;const rows=periodRecords(),[start,end]=windowDates().map(isoDate),teams=Array.from(new Set(state.records.map(r=>r.equipe).filter(Boolean))).sort(),ocs=rows.flatMap(r=>(r.ocorrencias||[]).map(o=>({...o,data:r.data,turno:r.turno,equipe:r.equipe}))),faltas=rows.flatMap(r=>(r.faltas||[]).map(f=>({...f,data:r.data}))),pend=rows.flatMap(r=>(r.proximo||[]).map(p=>({texto:p,data:r.data,turno:r.turno,equipe:r.equipe})));return`${topbar()}<main class="wrap"><section class="section"><div class="kicker">Relatorio consolidado</div><h1>${state.period==='mes'?`${MESES[parseDate(state.refDate).getMonth()]} de ${parseDate(state.refDate).getFullYear()}`:'Semana operacional'}</h1><p class="hint">${shortDate(start)} a ${shortDate(end)} - ${state.filterTurn.toLowerCase()} - ${state.filterTeam.toLowerCase()}</p><div class="no-print row"><div class="seg"><label><input type="radio" name="period" ${state.period==='semana'?'checked':''} onchange="setValue('period','semana')">Semanal</label><label><input type="radio" name="period" ${state.period==='mes'?'checked':''} onchange="setValue('period','mes')">Mensal</label></div><select onchange="setValue('filterTurn',this.value)"><option>Todos</option><option ${state.filterTurn==='Diurno'?'selected':''}>Diurno</option><option ${state.filterTurn==='Noturno'?'selected':''}>Noturno</option></select><select onchange="setValue('filterTeam',this.value)"><option>Todas as equipes</option>${teams.map(t=>`<option ${state.filterTeam===t?'selected':''}>${esc(t)}</option>`).join('')}</select><input type="date" value="${esc(state.refDate)}" onchange="setValue('refDate',this.value)"></div></section><section class="grid5"><div class="metric"><strong>${String(rows.length).padStart(2,'0')}</strong><span>Plantoes</span></div><div class="metric"><strong>${String(rows.filter(r=>r.turno==='Diurno').length).padStart(2,'0')}</strong><span>Diurnos</span></div><div class="metric"><strong>${String(rows.filter(r=>r.turno==='Noturno').length).padStart(2,'0')}</strong><span>Noturnos</span></div><div class="metric"><strong>${String(ocs.length).padStart(2,'0')}</strong><span>Ocorrencias</span></div><div class="metric"><strong>${String(faltas.length).padStart(2,'0')}</strong><span>Faltas</span></div></section><section class="section"><h3>Plantoes salvos</h3>${rows.length?`<table><thead><tr><th>Data</th><th>Turno</th><th>Equipe</th><th>Coordenador</th><th>Demandas</th><th>Pendencias</th><th>Ocorrencias</th><th>Faltas</th><th class="no-print">Acao</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${shortDate(r.data)}</td><td>${esc(r.turno)}</td><td>${esc(r.equipe||'-')}</td><td>${esc(r.coordenador||'-')}</td><td>${(r.dia||[]).length}</td><td>${(r.proximo||[]).length}</td><td>${(r.ocorrencias||[]).length}</td><td>${(r.faltas||[]).length}</td><td class="no-print"><button data-open-record="${esc(r.id)}">Abrir</button></td></tr>`).join('')}</tbody></table>`:'<p class="hint">Nenhum plantao salvo neste periodo.</p>'}</section><section class="section grid2"><div><h3>Ocorrencias do periodo</h3>${ocs.length?ocs.map(o=>`<p><strong>${shortDate(o.data)} - ${esc(o.turno)} - ${esc(o.hora||'sem hora')}</strong><br>${esc(o.texto)}</p>`).join(''):'<p class="hint">Sem ocorrencias no periodo.</p>'}</div><div><h3>Repasses registrados no periodo</h3>${pend.length?pend.map(p=>`<p><strong>${shortDate(p.data)} - ${esc(p.turno)} - ${esc(p.equipe||'-')}</strong><br>${esc(p.texto)}</p>`).join(''):'<p class="hint">Sem pendencias no periodo.</p>'}</div></section><section class="section"><h3>Faltas do periodo</h3>${faltas.length?`<table><thead><tr><th>Data</th><th>Nome</th><th>Justificativa</th></tr></thead><tbody>${faltas.map(f=>`<tr><td>${shortDate(f.data)}</td><td>${esc(f.nome)}</td><td>${esc(f.motivo||'Sem justificativa')}</td></tr>`).join('')}</tbody></table>`:'<p class="hint">Nenhuma falta no periodo.</p>'}<div class="no-print" style="margin-top:24px">${isChief()?`<button class="secondary" ${state.recordsLoading||state.recordsError?'disabled':''} onclick="exportCsv()">Exportar CSV</button>`:''}</div></section></main>`}
+function render(){const app=document.getElementById('app');if(state.loading)app.innerHTML='<main class="wrap"><p>Carregando...</p></main>';else if(serverUnavailable)app.innerHTML=setupView();else if(!state.user)app.innerHTML=authView();else if(!state.profile)app.innerHTML=`<main class="wrap"><p>${esc(state.error||'Acesso indisponivel.')}</p><button onclick="logout()">Sair</button></main>`;else if(state.view==='report')app.innerHTML=reportView();else if(state.view==='consolidado')app.innerHTML=consolidatedView();else app.innerHTML=formView()}
+document.addEventListener('input',event=>{if(state.user && event.target.matches('.wrap input,.wrap textarea,.wrap select') && state.view==='form')markDirty()});
+document.addEventListener('change',event=>{if(state.user && event.target.matches('.wrap input,.wrap textarea,.wrap select') && state.view==='form')markDirty()});
+document.addEventListener('click',event=>{const button=event.target.closest('[data-open-record]');if(button)openRecord(button.dataset.openRecord)});
+window.addEventListener('beforeunload',event=>{if(state.dirty){event.preventDefault();event.returnValue=''}});
+if(accountChannel)accountChannel.onmessage=()=>{resetSession();state.loading=true;render();void init()};
+window.addEventListener('focus',()=>{if(!state.authBusy)void init()});
 init();
 

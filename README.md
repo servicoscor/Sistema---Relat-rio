@@ -1,48 +1,69 @@
-# Sistema Relatorio de Plantao
+# Sistema de Relatorios - banco interno
 
-Aplicacao web estatica para registro, impressao e consolidacao de relatorios de plantao.
+API Node.js/Express com SQLite no proprio servidor. Nao requer Supabase, conta em nuvem ou servico
+de banco separado. O navegador acessa apenas a API, no mesmo endereco do site.
 
-## Funcionalidades
+## Rodar neste computador
 
-- Cadastro e login local.
-- Acesso geral com perfil de Chefia.
-- Registro de data, turno, equipe e coordenador.
-- Controle de integrantes e faltas.
-- Registro de demandas do dia, pendencias para o proximo plantao e ocorrencias.
-- Geracao de relatorio para impressao ou PDF.
-- Historico local de plantoes salvos.
-- Painel consolidado semanal ou mensal para perfil de Chefia.
-- Exportacao CSV do consolidado.
+Instale Node.js 24 LTS (24.12 ou mais recente da linha 24):
 
-## Configuracao do Supabase
+```sh
+npm ci
+npm run init-db
+npm run manage -- create-user chefia@empresa.com.br "Nome da Chefia" Chefia
+npm start
+```
 
-1. Crie um projeto no Supabase.
-2. Abra `SQL Editor` e execute o arquivo `supabase/schema.sql`.
-3. Copie `config.example.js` para `config.js`.
-4. Preencha `SUPABASE_URL` e `SUPABASE_ANON_KEY` em `config.js`.
-5. Em `Authentication > Providers > Email`, defina se o projeto exigira confirmacao por e-mail.
+Substitua nome/e-mail por dados reais. A senha e solicitada duas vezes no terminal, sem exibicao;
+nao existe senha padrao. Abra **http://127.0.0.1:3000**. O modo local aceita conexoes apenas deste computador.
+O banco fica em `data/relatorios.sqlite`; preserve essa pasta nas atualizacoes.
 
-## Acesso geral
+## Recursos
 
-O acesso geral e definido pela tabela `app_admin_emails` no Supabase. O SQL inicial usa:
+- Senhas derivadas por scrypt; sessoes no banco e cookie HttpOnly/SameSite, com Secure em producao.
+- Sessoes de 8 horas, revogadas ao sair, desativar a conta ou redefinir a senha.
+- Protecao CSRF e limites de tentativas de login persistidos no banco.
+- Contas administradas por comandos locais, sem cadastro publico ou promocao pelo navegador.
+- Supervisor acessa seus relatorios e escreve em equipes liberadas; Chefia acessa todos.
+- Validacao na API, autoria pelo servidor, controle de versao e auditoria atomica das gravacoes.
+- Historico paginado, impressao/PDF e CSV com neutralizacao de formulas.
+- Nenhuma rota publica para exclusao de relatorios, banco, codigo do servidor ou credenciais.
+- Backup consistente e exemplos de agendamento diario.
 
-- E-mail: `admin@plantao.local`
-- Perfil: `Chefia`
+## Administracao
 
-Antes de executar em producao, troque esse e-mail no arquivo `supabase/schema.sql` pelo seu e-mail real. Depois cadastre esse mesmo e-mail na tela do sistema. O banco criara o perfil como `Chefia`; os demais usuarios entram como `Supervisor`.
+```sh
+npm run manage -- create-user supervisor@empresa.com.br "Nome Completo" Supervisor "Equipe A"
+npm run manage -- grant-team supervisor@empresa.com.br "Equipe B"
+npm run manage -- revoke-team supervisor@empresa.com.br "Equipe B"
+npm run manage -- reset-password supervisor@empresa.com.br
+npm run manage -- disable-user supervisor@empresa.com.br
+npm run manage -- list-users
+npm run manage -- backup backups/copia-2026-09-09.sqlite
+```
 
-## Publicacao
+Remover equipe revoga escrita; desativar conta revoga todo acesso. Cada pessoa deve ter uma conta propria.
+No servidor use o usuario de servico e DATABASE_PATH indicados em [DEPLOY.md](DEPLOY.md).
 
-Este projeto esta pronto para hospedagem estatica. O arquivo principal e `index.html`.
+## Testes e publicacao
 
-Para publicar pelo GitHub Pages:
+```sh
+npm test
+npm run build
+```
 
-1. Envie os arquivos para o branch `main`.
-2. No GitHub, acesse `Settings > Pages`.
-3. Em `Build and deployment`, selecione `Deploy from a branch`.
-4. Escolha o branch `main` e a pasta `/root`.
-5. Salve e aguarde a URL de publicacao.
+Os testes usam HTTP real em loopback, SQLite isolado e respostas simuladas para a interface.
+Cobrem login, autorizacao, CSRF, conflitos, expiracao, auditoria e reabertura do backup.
+Nao acessam o servidor publico. `dist/` e um **pacote de servidor**, nao uma hospedagem estatica.
+Veja [DEPLOY.md](DEPLOY.md) para Ubuntu/Apache. A porta externa pode continuar em 5000, com HTTPS.
 
-## Observacao importante
+SQLite atende a instalacao em um servidor com gravacoes curtas. Ha um escritor de cada vez.
+Use disco local, nunca NFS/compartilhamento de rede. Para varias instancias ou alto volume concorrente,
+planeje PostgreSQL e valide a carga. O modulo nativo `node:sqlite` no Node 24 ainda emite aviso de
+recurso experimental; mantenha a linha LTS especificada e o lockfile.
 
-A senha nao fica salva no navegador. O login e controlado pelo Supabase Auth e os relatorios ficam centralizados no banco. A chave `SUPABASE_ANON_KEY` e publica por natureza, mas as permissoes do banco dependem das politicas RLS do arquivo `supabase/schema.sql`.
+Arquivos antigos do Supabase e o HTML `.dc.html` permanecem como historico local, sem uso ou publicacao.
+`config.js` deixou de ser necessario. Nao ha importacao automatica de dados antigos; confira-os antes de descartar.
+
+Proximas etapas: pendencias com responsavel/prazo/status, aceite, fechamento, interface administrativa e IA.
+Recuperacao de senha e feita pela administracao com o comando acima; nao ha envio de e-mail automatico.

@@ -23,7 +23,7 @@ O banco fica em `data/relatorios.sqlite`; preserve essa pasta nas atualizacoes.
 - Senhas derivadas por scrypt; sessoes no banco e cookie HttpOnly/SameSite, com Secure em producao.
 - Sessoes de 8 horas, revogadas ao sair, desativar a conta ou redefinir a senha.
 - Protecao CSRF e limites de tentativas de login persistidos no banco.
-- Contas administradas por comandos locais, sem cadastro publico ou promocao pelo navegador.
+- Cadastro publico cria apenas Supervisor, com nome, e-mail, equipe e senha de 12 a 128 caracteres. Chefia e concedida apenas pela administracao via comandos locais.
 - Supervisor acessa seus relatorios e escreve em equipes liberadas; Chefia acessa todos.
 - Validacao na API, autoria pelo servidor, controle de versao e auditoria atomica das gravacoes.
 - Historico paginado, impressao/PDF e CSV com neutralizacao de formulas.

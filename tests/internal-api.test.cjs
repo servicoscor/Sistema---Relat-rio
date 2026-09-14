@@ -48,6 +48,18 @@ test('internal API: authentication, isolation, validation, audit and backups', a
       assert.equal((await anon.request('/api/signup','POST',{})).status,404);
       const page=await anon.request('/');assert.equal(page.status,200);assert.ok(!page.data.includes('supabase-js'));
     });
+    await t.test('public registration forces Supervisor and validates credentials and CSRF',async()=>{
+      const c=client();await c.request('/api/session');
+      const body={email:'new@example.test',nome:'Novo',password,equipe:'Nova',perfil:'Chefia',teams:['A','B']};
+      assert.equal((await c.request('/api/register','POST',body,{'x-csrf-token':''})).status,403);
+      assert.equal((await c.request('/api/register','POST',{...body,password:'short'})).status,400);
+      assert.equal((await c.request('/api/register','POST',body)).status,201);
+      assert.equal((await c.request('/api/register','POST',body)).status,409);
+      const signed=await c.login(body.email);assert.equal(signed.status,200);
+      assert.equal(signed.data.user.perfil,'Supervisor');assert.deepEqual(signed.data.teams,['Nova']);
+      assert.equal((await c.request('/api/reports','POST',payload)).status,403);
+      assert.equal((await c.request('/api/reports/anything/audit')).status,403);
+    });
     await t.test('login rotates cookie; passwords are hashed; CSRF and origins are enforced',async()=>{
       await A.request('/api/session');const previous=A.cookie;
       assert.equal((await A.request('/api/login','POST',{email:'a@example.test',password},{'x-csrf-token':''})).status,403);
@@ -97,7 +109,7 @@ test('internal API: authentication, isolation, validation, audit and backups', a
       const folder=fs.mkdtempSync(path.join(os.tmpdir(),'plantao-backup-test-'));const file=path.join(folder,'backup.sqlite');
       await backup(db,file);
       const {DatabaseSync}=require('node:sqlite');const restored=new DatabaseSync(file,{readOnly:true});
-      try {assert.equal(restored.prepare('SELECT count(*) AS n FROM reports').get().n,1);assert.equal(restored.prepare('SELECT count(*) AS n FROM audit').get().n,2);assert.equal(restored.prepare('SELECT count(*) AS n FROM users').get().n,3)}
+      try {assert.equal(restored.prepare('SELECT count(*) AS n FROM reports').get().n,1);assert.equal(restored.prepare('SELECT count(*) AS n FROM audit').get().n,2);assert.equal(restored.prepare('SELECT count(*) AS n FROM users').get().n,4)}
       finally{restored.close();fs.unlinkSync(file);fs.rmdirSync(folder)}
     });
     await t.test('rate limit is persistent and repeated bad logins are blocked',async()=>{

@@ -14,6 +14,14 @@ function harness(handler=async()=>({data:[],count:0}),date){
   run("state.loading=false;state.user={id:'A'};state.profile={id:'A',nome:'A',perfil:'Supervisor'};state.teams=['A'];state.form.equipe='A';state.refDate='2026-09-09'");
   return {run,ctx,el,timers,calls};
 }
+test('registration form submits Supervisor details then logs in',async()=>{
+  const h=harness(url=>url==='/api/register'?{ok:true}:url==='/api/login'?{user:{id:'new',nome:'Novo',perfil:'Supervisor'},teams:['B'],csrf:'new'}:{data:[],count:0});
+  h.run("state.authMode='access';state.authEmail='new@example.test';state.authName='Novo';state.authTeam='B';state.authPass='Test-password-123'");
+  const markup=h.run('authView()');assert.ok(markup.includes('register-name'));assert.ok(markup.includes('register-team'));assert.ok(markup.includes('minlength="12"'));
+  await h.run('loginOrSignup()');
+  assert.equal(h.calls[0].url,'/api/register');assert.equal(JSON.parse(h.calls[0].options.body).equipe,'B');
+  assert.equal(h.calls[1].url,'/api/login');assert.equal(h.run('state.authPass'),'');assert.equal(h.run('isChief()'),false);
+});
 test('Sao Paulo date does not advance after 21h',()=>assert.equal(harness(undefined,'2026-09-09T21:30:00-03:00').run('today()'),'2026-09-09'));
 test('CSV neutralizes formulas and quotes',()=>{
   const h=harness();for(const text of ['=1','+1','-1','@SUM(A1)','  =1','\ttext','\rtext','\ntext','\uFF1D1']){h.ctx.value=text;assert.ok(h.run('csvCell(value)').startsWith(String.fromCharCode(34,39)))}

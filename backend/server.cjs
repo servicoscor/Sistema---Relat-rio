@@ -2,7 +2,7 @@ const express = require('express');
 const helmet = require('helmet');
 const crypto = require('node:crypto');
 const path = require('node:path');
-const { openDatabase, verifyPassword, transaction, serialize } = require('./database.cjs');
+const { openDatabase, verifyPassword, createUser, transaction, serialize } = require('./database.cjs');
 const root = path.join(__dirname, '..');
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 const token = () => crypto.randomBytes(32).toString('base64url');
@@ -96,6 +96,19 @@ function createApp(options = {}) {
       count=CASE WHEN expires>? THEN count+1 ELSE 1 END,
       expires=CASE WHEN expires>? THEN expires ELSE excluded.expires END`).run(key,now+900000,now,now);
   }
+  app.post('/api/register',async (req,res) => {
+    if (req.user) throw fail(409,'Saia da conta atual antes de cadastrar outra.');
+    checkRate('register:'+digest(req.ip),5);
+    const {email,nome,password,equipe} = req.body || {};
+    if (typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || typeof nome !== 'string' || !nome.trim() || nome.length > 200 || typeof equipe !== 'string' || !equipe.trim() || equipe.trim().length > 120 || typeof password !== 'string' || password.length < 12 || password.length > 128) throw fail(400,'Informe nome, e-mail, equipe e senha de 12 a 128 caracteres.');
+    try {
+      await createUser(db,{email,nome,password,perfil:'Supervisor',teams:[equipe]});
+    } catch(error) {
+      if (error.message?.includes('UNIQUE constraint failed: users.email')) throw fail(409,'Não foi possível cadastrar esse e-mail. Tente entrar ou procure a administração.');
+      throw error;
+    }
+    res.status(201).json({ok:true});
+  });
   app.post('/api/login',async (req,res) => {
     const {email,password} = req.body || {};
     if (typeof email !== 'string' || email.length > 254 || typeof password !== 'string' || password.length > 128) throw fail(400,'Informe e-mail e senha.');

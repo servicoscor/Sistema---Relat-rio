@@ -80,7 +80,34 @@ function createApp(options = {}) {
   });
   function requireUser(req,res,next) { if (!req.user) return next(fail(401,'Sua sessao expirou. Entre novamente.')); next(); }
   function teams(id) { return db.prepare('SELECT equipe FROM memberships WHERE user_id=? ORDER BY equipe').all(id).map(r=>r.equipe); }
-  function sessionData(req) { return { user:req.user || null, teams:req.user ? teams(req.user.id) : [], csrf:req.authSession.csrf, expires:req.authSession.expires }; }
+  function defaults(id) { const row=db.prepare('SELECT payload FROM user_defaults WHERE user_id=?').get(id); return row?JSON.parse(row.payload):null; }
+  function sessionData(req) { return { user:req.user || null, teams:req.user ? teams(req.user.id) : [], defaults:req.user?defaults(req.user.id):null, csrf:req.authSession.csrf, expires:req.authSession.expires }; }
+  app.put('/api/defaults',requireUser,(req,res) => {
+    const {equipe,turno,signature}=req.body||{};
+    if(typeof equipe!=='string'||equipe.length>120||(equipe&&!canWrite(req.user,equipe))||!['Diurno','Noturno'].includes(turno)||typeof signature!=='string'||signature.length>180000|| (signature && !/^data:image\/png;base64,iVBORw0KGgo[A-Za-z0-9+/=]+$/.test(signature))) throw fail(400,'Confira equipe, turno e assinatura PNG.');
+    const value={equipe,turno,signature};
+    db.prepare('INSERT INTO user_defaults VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET payload=excluded.payload').run(req.user.id,JSON.stringify(value));
+    res.json(value);
+  });
+  app.get('/api/groups',requireUser,(req,res)=>{
+    const equipe=req.query.equipe;
+    if(typeof equipe!=='string'||!equipe||!canWrite(req.user,equipe)) throw fail(403,'Equipe não autorizada.');
+    const row=db.prepare('SELECT payload FROM team_groups WHERE equipe=?').get(equipe);
+    res.json({groups:row?JSON.parse(row.payload):[],version:digest(row?.payload||'[]')});
+  });
+  app.put('/api/groups',requireUser,(req,res)=>{
+    const {equipe,groups}=req.body||{};
+    if(typeof equipe!=='string'||!equipe||equipe.length>120||!canWrite(req.user,equipe)) throw fail(403,'Equipe não autorizada.');
+    if(!Array.isArray(groups)||groups.length>30) throw fail(400,'Limite de 30 grupos por equipe.');
+    const old=db.prepare('SELECT payload FROM team_groups WHERE equipe=?').get(equipe);
+    if(req.body.version!==digest(old?.payload||'[]')) throw fail(409,'Os grupos mudaram. Carregue novamente antes de salvar.');
+    const normalized=groups.map(g=>{
+      if(!g||typeof g.nome!=='string'||!g.nome.trim()||g.nome.length>120||!Array.isArray(g.integrantes)||g.integrantes.length>100||g.integrantes.some(n=>typeof n!=='string'||!n.trim()||n.length>200)) throw fail(400,'Informe o nome do grupo e até 100 integrantes.');
+      return {nome:g.nome.trim(),integrantes:[...new Set(g.integrantes.map(n=>n.trim()))]};
+    });
+    db.prepare('INSERT INTO team_groups VALUES (?,?) ON CONFLICT(equipe) DO UPDATE SET payload=excluded.payload').run(equipe,JSON.stringify(normalized));
+    res.json({groups:normalized,version:digest(JSON.stringify(normalized))});
+  });
   app.get('/api/session',(req,res) => {
     if (!req.authSession || (req.authSession.user_id && !req.user)) {
       checkRate('sessions:'+digest(req.ip),120);
@@ -155,12 +182,13 @@ function createApp(options = {}) {
       if (previous && (typeof req.body.updated_at !== 'string' || previous.updated_at !== req.body.updated_at)) throw fail(409,'Este plantao mudou. Reabra pelo Historico antes de salvar.');
       const stamp = new Date(Math.max(Date.now(),previous ? Date.parse(previous.updated_at)+1 : 0)).toISOString();
       const id = previous?.id || crypto.randomUUID();
+      payload.assinatura={nome:req.user.nome,perfil:req.user.perfil,user_id:req.user.id,em:stamp,imagem:defaults(req.user.id)?.signature||''};
       if (previous) db.prepare('UPDATE reports SET data=?,turno=?,equipe=?,payload=?,updated_at=? WHERE id=?').run(payload.data,payload.turno,payload.equipe,JSON.stringify(payload),stamp,id);
       else db.prepare('INSERT INTO reports VALUES (?,?,?,?,?,?,?,?)').run(id,payload.data,payload.turno,payload.equipe,req.user.id,JSON.stringify(payload),stamp,stamp);
       const row = db.prepare('SELECT * FROM reports WHERE id=?').get(id);
       db.prepare('INSERT INTO audit(report_id,actor_id,operation,occurred_at,previous_data,next_data) VALUES (?,?,?,?,?,?)')
         .run(id,req.user.id,previous?'UPDATE':'INSERT',stamp,previous?JSON.stringify(serialize(previous)):null,JSON.stringify(serialize(row)));
-      return {id,updated_at:stamp};
+      return {id,updated_at:stamp,assinatura:payload.assinatura};
     });
     res.status(req.params.id ? 200 : 201).json(result);
   }

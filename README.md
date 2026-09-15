@@ -32,6 +32,16 @@ O banco fica em `data/relatorios.sqlite`; preserve essa pasta nas atualizacoes.
 
 ## Administracao
 
+## Preferencias, grupos e assinatura
+
+O coordenador responsavel de um novo plantao e preenchido com o nome do usuario conectado e pode ser ajustado no formulario. Em "Meu preenchimento automatico e assinatura", o usuario salva equipe e turno padrao e envia sua assinatura em PNG (ate 130 KB).
+
+Os grupos de integrantes sao compartilhados por equipe. Usuarios autorizados nessa equipe podem carregar, aplicar e salvar grupos; a Chefia pode administrar grupos de qualquer equipe. Aplicar um grupo copia os nomes para o relatorio e nao altera relatorios anteriores. Alteracoes concorrentes nos grupos sao rejeitadas para evitar sobrescrita.
+
+Ao salvar o relatorio, o servidor registra nome, perfil, horario e uma copia da assinatura do usuario que salvou. Trocar a imagem no perfil nao altera relatorios ja salvos. Uma nova edicao salva recebe a identificacao de quem a salvou, e a versao anterior permanece na auditoria. A imagem nao constitui assinatura digital certificada.
+
+## Comandos administrativos
+
 ```sh
 npm run manage -- create-user supervisor@empresa.com.br "Nome Completo" Supervisor "Equipe A"
 npm run manage -- grant-team supervisor@empresa.com.br "Equipe B"

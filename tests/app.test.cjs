@@ -22,6 +22,15 @@ test('registration form submits Supervisor details then logs in',async()=>{
   assert.equal(h.calls[0].url,'/api/register');assert.equal(JSON.parse(h.calls[0].options.body).equipe,'B');
   assert.equal(h.calls[1].url,'/api/login');assert.equal(h.run('state.authPass'),'');assert.equal(h.run('isChief()'),false);
 });
+test('new reports use personal defaults and shared groups never leak between teams',()=>{
+  const h=harness();h.run("state.defaults={equipe:'A',turno:'Noturno'};clearForm()");
+  assert.equal(h.run('state.form.coordenador'),'A');assert.equal(h.run('state.form.turno'),'Noturno');
+  h.run("state.groupsTeam='B';state.groups=[{nome:'B',integrantes:['PRIVATE']}];applyGroup(0)");
+  assert.equal(h.run("state.form.integrantes.includes('PRIVATE')"),false);
+  h.run("state.groupsTeam='A';applyGroup(0)");assert.equal(h.run('state.form.integrantes.length'),1);
+  assert.equal(h.run('state.dirty'),true);
+  h.run('resetSession()');assert.equal(h.run('state.groups.length'),0);assert.equal(h.run('state.defaults'),null);
+});
 test('Sao Paulo date does not advance after 21h',()=>assert.equal(harness(undefined,'2026-09-09T21:30:00-03:00').run('today()'),'2026-09-09'));
 test('CSV neutralizes formulas and quotes',()=>{
   const h=harness();for(const text of ['=1','+1','-1','@SUM(A1)','  =1','\ttext','\rtext','\ntext','\uFF1D1']){h.ctx.value=text;assert.ok(h.run('csvCell(value)').startsWith(String.fromCharCode(34,39)))}

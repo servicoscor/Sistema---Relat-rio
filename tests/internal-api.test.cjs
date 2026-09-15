@@ -69,9 +69,30 @@ test('internal API: authentication, isolation, validation, audit and backups', a
       assert.equal((await B.login('b@example.test')).status,200);
       assert.equal((await chief.login('chief@example.test')).status,200);
     });
+    await t.test('defaults are private; team groups are shared only with authorized users',async()=>{
+      const signature='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=';
+      assert.equal((await A.request('/api/defaults','PUT',{equipe:'A',turno:'Noturno',signature})).status,200);
+      assert.equal((await B.request('/api/session')).data.defaults,null);
+      assert.equal((await A.request('/api/defaults','PUT',{equipe:'B',turno:'Diurno',signature:''})).status,400);
+      assert.equal((await A.request('/api/defaults','PUT',{equipe:'A',turno:'Diurno',signature:'data:image/svg+xml,<svg/>'})).status,400);
+      const initial=await A.request('/api/groups?equipe=A');
+      const body={equipe:'A',version:initial.data.version,groups:[{nome:'Grupo diurno',integrantes:['Ana','Pedro']}]};
+      assert.equal((await A.request('/api/groups','PUT',body)).status,200);
+      assert.equal((await A.request('/api/groups','PUT',body)).status,409);
+      assert.equal((await B.request('/api/groups?equipe=A')).status,403);
+      assert.equal((await B.request('/api/groups','PUT',body)).status,403);
+      assert.equal((await chief.request('/api/groups?equipe=A')).data.groups[0].integrantes.length,2);
+      db.prepare('INSERT INTO memberships VALUES (?,?)').run(b,'A');
+      assert.equal((await B.request('/api/groups?equipe=A')).data.groups[0].nome,'Grupo diurno');
+      db.prepare('DELETE FROM memberships WHERE user_id=? AND equipe=?').run(b,'A');
+    });
     await t.test('author is determined by server; other users cannot read or change reports',async()=>{
       const saved=await A.request('/api/reports','POST',{...payload,autor_id:b});assert.equal(saved.status,201);record=saved.data;
       const rows=(await A.request('/api/reports?start=2026-09-01&end=2026-09-30')).data;assert.equal(rows.count,1);assert.equal(rows.data[0].autor_id,a);
+      assert.equal(rows.data[0].assinatura.user_id,a);assert.ok(rows.data[0].assinatura.imagem.startsWith('data:image/png'));
+      await A.request('/api/defaults','PUT',{equipe:'A',turno:'Diurno',signature:''});
+      const unchanged=(await A.request('/api/reports?start=2026-09-01&end=2026-09-30')).data.data[0];
+      assert.equal(unchanged.assinatura.imagem,rows.data[0].assinatura.imagem);
       assert.equal((await B.request('/api/reports?start=2026-09-01&end=2026-09-30')).data.count,0);
       assert.equal((await B.request('/api/reports/'+record.id,'PUT',{...payload,equipe:'B',updated_at:record.updated_at})).status,404);
       assert.equal((await A.request('/api/reports','POST',{...payload,data:'2026-09-10',equipe:'B'})).status,403);

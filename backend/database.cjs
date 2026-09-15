@@ -18,6 +18,12 @@ function openDatabase(filename) {
       user_id TEXT NOT NULL REFERENCES users(id), equipe TEXT NOT NULL,
       PRIMARY KEY(user_id,equipe)
     );
+    CREATE TABLE IF NOT EXISTS user_defaults (
+      user_id TEXT PRIMARY KEY REFERENCES users(id), payload TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS team_groups (
+      equipe TEXT PRIMARY KEY, payload TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY, user_id TEXT REFERENCES users(id), csrf TEXT NOT NULL,
       expires INTEGER NOT NULL

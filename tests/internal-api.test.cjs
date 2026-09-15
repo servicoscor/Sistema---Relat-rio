@@ -55,10 +55,13 @@ test('internal API: authentication, isolation, validation, audit and backups', a
       assert.equal((await c.request('/api/register','POST',{...body,password:'short'})).status,400);
       assert.equal((await c.request('/api/register','POST',body)).status,201);
       assert.equal((await c.request('/api/register','POST',body)).status,409);
-      const signed=await c.login(body.email);assert.equal(signed.status,200);
-      assert.equal(signed.data.user.perfil,'Supervisor');assert.deepEqual(signed.data.teams,['Nova']);
-      assert.equal((await c.request('/api/reports','POST',payload)).status,403);
-      assert.equal((await c.request('/api/reports/anything/audit')).status,403);
+      const signed=await c.login(body.email);assert.equal(signed.status,403);
+      const pending=db.prepare('SELECT id,perfil,active,access_status FROM users WHERE email=?').get(body.email);
+      assert.equal(pending.perfil,'Supervisor');assert.equal(pending.active,0);assert.equal(pending.access_status,'pending');
+      assert.equal(db.prepare('SELECT count(*) AS n FROM memberships WHERE user_id=?').get(pending.id).n,0);
+      assert.equal((await c.request('/api/reports','POST',payload)).status,401);
+      assert.equal((await c.request('/api/groups?equipe=Nova')).status,401);
+      assert.equal((await c.request('/api/security/users')).status,401);
     });
     await t.test('login rotates cookie; passwords are hashed; CSRF and origins are enforced',async()=>{
       await A.request('/api/session');const previous=A.cookie;
@@ -68,6 +71,32 @@ test('internal API: authentication, isolation, validation, audit and backups', a
       assert.notEqual(db.prepare('SELECT password_hash FROM users WHERE id=?').get(a).password_hash,password);
       assert.equal((await B.login('b@example.test')).status,200);
       assert.equal((await chief.login('chief@example.test')).status,200);
+    });
+    await t.test('only Chefia approves explicit teams, blocks sessions and records decisions',async()=>{
+      assert.equal((await A.request('/api/security/users')).status,403);
+      assert.equal((await A.request('/api/security/audit')).status,403);
+      const list=await chief.request('/api/security/users');assert.equal(list.status,200);
+      assert.ok(!JSON.stringify(list.data).includes('password_hash'));
+      const pending=list.data.users.find(u=>u.email==='new@example.test');
+      const route='/api/security/users/'+pending.id;
+      const approval={action:'approve',teams:['Liberada'],version:pending.security_version,perfil:'Chefia'};
+      assert.equal((await A.request(route,'PUT',approval)).status,403);
+      assert.equal((await chief.request(route,'PUT',approval,{'x-csrf-token':''})).status,403);
+      assert.equal((await chief.request(route,'PUT',{...approval,teams:[]})).status,400);
+      const granted=await chief.request(route,'PUT',approval);assert.equal(granted.status,200);
+      assert.equal(granted.data.user.perfil,'Supervisor');assert.deepEqual(granted.data.user.teams,['Liberada']);
+      assert.equal((await chief.request(route,'PUT',approval)).status,409);
+      const c=client();assert.equal((await c.login(pending.email)).status,200);
+      assert.equal((await c.request('/api/reports','POST',{...payload,equipe:'Nova'})).status,403);
+      const own=await c.request('/api/reports','POST',{...payload,equipe:'Liberada'});assert.equal(own.status,201);
+      const blocked=await chief.request(route,'PUT',{action:'block',version:granted.data.user.security_version});assert.equal(blocked.status,200);
+      assert.equal((await c.request('/api/reports?start=2026-09-01&end=2026-09-30')).status,401);
+      assert.equal((await c.login(pending.email)).status,403);
+      assert.ok(db.prepare('SELECT id FROM reports WHERE id=?').get(own.data.id));
+      const audit=await chief.request('/api/security/audit');assert.equal(audit.data.events.length,2);
+      assert.equal(audit.data.events[0].action,'block');
+      const boss=list.data.users.find(u=>u.perfil==='Chefia');
+      assert.equal((await chief.request('/api/security/users/'+boss.id,'PUT',{action:'block',version:boss.security_version})).status,403);
     });
     await t.test('defaults are private; team groups are shared only with authorized users',async()=>{
       const signature='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=';
@@ -130,7 +159,7 @@ test('internal API: authentication, isolation, validation, audit and backups', a
       const folder=fs.mkdtempSync(path.join(os.tmpdir(),'plantao-backup-test-'));const file=path.join(folder,'backup.sqlite');
       await backup(db,file);
       const {DatabaseSync}=require('node:sqlite');const restored=new DatabaseSync(file,{readOnly:true});
-      try {assert.equal(restored.prepare('SELECT count(*) AS n FROM reports').get().n,1);assert.equal(restored.prepare('SELECT count(*) AS n FROM audit').get().n,2);assert.equal(restored.prepare('SELECT count(*) AS n FROM users').get().n,4)}
+      try {assert.equal(restored.prepare('SELECT count(*) AS n FROM reports').get().n,2);assert.equal(restored.prepare('SELECT count(*) AS n FROM audit').get().n,3);assert.equal(restored.prepare('SELECT count(*) AS n FROM users').get().n,4)}
       finally{restored.close();fs.unlinkSync(file);fs.rmdirSync(folder)}
     });
     await t.test('rate limit is persistent and repeated bad logins are blocked',async()=>{

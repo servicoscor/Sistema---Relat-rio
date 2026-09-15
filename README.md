@@ -23,7 +23,7 @@ O banco fica em `data/relatorios.sqlite`; preserve essa pasta nas atualizacoes.
 - Senhas derivadas por scrypt; sessoes no banco e cookie HttpOnly/SameSite, com Secure em producao.
 - Sessoes de 8 horas, revogadas ao sair, desativar a conta ou redefinir a senha.
 - Protecao CSRF e limites de tentativas de login persistidos no banco.
-- Cadastro publico cria apenas Supervisor, com nome, e-mail, equipe e senha de 12 a 128 caracteres. Chefia e concedida apenas pela administracao via comandos locais.
+- Cadastro publico cria uma solicitacao pendente de Supervisor, sem login nem equipe autorizada. Apenas a Chefia aprova o acesso e define as equipes no painel Seguranca. Chefia e concedida apenas pela administracao via comandos locais.
 - Supervisor acessa seus relatorios e escreve em equipes liberadas; Chefia acessa todos.
 - Validacao na API, autoria pelo servidor, controle de versao e auditoria atomica das gravacoes.
 - Historico paginado, impressao/PDF e CSV com neutralizacao de formulas.
@@ -31,6 +31,10 @@ O banco fica em `data/relatorios.sqlite`; preserve essa pasta nas atualizacoes.
 - Backup consistente e exemplos de agendamento diario.
 
 ## Administracao
+
+O menu **Seguranca** aparece somente para Chefia. A API tambem exige esse perfil para listar contas, aprovar Supervisores, alterar equipes, bloquear acesso e consultar as ultimas 50 decisoes. A equipe solicitada nao e aplicada automaticamente: a Chefia deve preencher explicitamente as equipes autorizadas. Aprovacoes, alteracoes de equipes e bloqueios encerram as sessoes existentes da conta. As decisoes registram autor, data e estados anterior/posterior. O painel nao promove contas para Chefia nem altera contas de Chefia.
+
+**Migracao de seguranca:** na primeira inicializacao desta versao, Supervisores existentes ficam pendentes de revisao (ou continuam bloqueados, se ja estavam inativos), e suas sessoes sao encerradas. Nao ha informacao confiavel sobre aprovacao no cadastro antigo. Chefias ativas permanecem ativas; usuarios, senhas, equipes anteriores e relatorios sao preservados. A Chefia deve revisar os Supervisores no painel e definir as equipes corretas. A migracao e executada uma unica vez. O backup administrativo usa a base original em modo somente leitura, antes de qualquer migracao.
 
 ## Preferencias, grupos e assinatura
 

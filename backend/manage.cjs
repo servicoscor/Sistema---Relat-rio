@@ -26,7 +26,8 @@ async function main() {
     throw new Error('Comandos: init | create-user EMAIL NOME Chefia|Supervisor [EQUIPE...] | list-users | grant-team EMAIL EQUIPE | revoke-team EMAIL EQUIPE | reset-password EMAIL | disable-user EMAIL | backup ARQUIVO');
   }
   if (!['init','create-user'].includes(command) && !fs.existsSync(filename)) throw new Error('Banco nao encontrado. Confira DATABASE_PATH.');
-  const db = openDatabase(filename);
+  // A backup must capture the original schema before any pending migrations.
+  const db = command==='backup' ? new (require('node:sqlite').DatabaseSync)(filename,{readOnly:true}) : openDatabase(filename);
   try {
     if (command === 'init') { console.log('Banco interno inicializado.'); return; }
     if (command === 'create-user') {
@@ -34,7 +35,7 @@ async function main() {
       await createUser(db,{email,nome,perfil,teams,password:await passwordPrompt()});
       console.log('Conta criada.'); return;
     }
-    if (command === 'list-users') { console.table(db.prepare('SELECT email,nome,perfil,active FROM users ORDER BY nome').all()); return; }
+    if (command === 'list-users') { console.table(db.prepare('SELECT email,nome,perfil,active,access_status FROM users ORDER BY nome').all()); return; }
     if (command === 'backup') {
       if (!args[0]) throw new Error('Informe o arquivo de destino do backup.');
       const target = path.resolve(args[0]);
@@ -54,7 +55,7 @@ async function main() {
     } else if (command === 'disable-user') {
       transaction(db,() => {
         if (user.perfil === 'Chefia' && user.active && db.prepare("SELECT count(*) AS n FROM users WHERE perfil='Chefia' AND active=1").get().n <= 1) throw new Error('Crie outra Chefia antes de desativar a ultima.');
-        db.prepare('UPDATE users SET active=0 WHERE id=?').run(user.id);
+        db.prepare("UPDATE users SET active=0,access_status='blocked',security_version=security_version+1 WHERE id=?").run(user.id);
         db.prepare('DELETE FROM sessions WHERE user_id=?').run(user.id);
       });
     } else {

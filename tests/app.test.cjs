@@ -14,13 +14,22 @@ function harness(handler=async()=>({data:[],count:0}),date){
   run("state.loading=false;state.user={id:'A'};state.profile={id:'A',nome:'A',perfil:'Supervisor'};state.teams=['A'];state.form.equipe='A';state.refDate='2026-09-09'");
   return {run,ctx,el,timers,calls};
 }
-test('registration form submits Supervisor details then logs in',async()=>{
+test('registration submits request and waits for approval without automatic login',async()=>{
   const h=harness(url=>url==='/api/register'?{ok:true}:url==='/api/login'?{user:{id:'new',nome:'Novo',perfil:'Supervisor'},teams:['B'],csrf:'new'}:{data:[],count:0});
   h.run("state.authMode='access';state.authEmail='new@example.test';state.authName='Novo';state.authTeam='B';state.authPass='Test-password-123'");
   const markup=h.run('authView()');assert.ok(markup.includes('register-name'));assert.ok(markup.includes('register-team'));assert.ok(markup.includes('minlength="12"'));
   await h.run('loginOrSignup()');
   assert.equal(h.calls[0].url,'/api/register');assert.equal(JSON.parse(h.calls[0].options.body).equipe,'B');
-  assert.equal(h.calls[1].url,'/api/login');assert.equal(h.run('state.authPass'),'');assert.equal(h.run('isChief()'),false);
+  assert.equal(h.calls.length,1);assert.equal(h.run('state.authPass'),'');assert.equal(h.run('isChief()'),false);
+  assert.ok(h.run('state.notice').includes('aprovação'));
+});
+test('security panel is hidden from Supervisor and discards results after logout',async()=>{
+  let finish;
+  const h=harness(url=>url.startsWith('/api/security/users')?new Promise(resolve=>finish=resolve):{events:[]});
+  assert.equal(h.run('securityView()'),'');assert.ok(!h.run('topbar()').includes('openSecurity()'));
+  h.run("state.profile.perfil='Chefia'");assert.ok(h.run('topbar()').includes('openSecurity()'));
+  const pending=h.run('loadSecurity()');h.run('resetSession()');finish({users:[{email:'PRIVATE'}],count:1});await pending;
+  assert.equal(h.run('state.securityUsers.length'),0);
 });
 test('new reports use personal defaults and shared groups never leak between teams',()=>{
   const h=harness();h.run("state.defaults={equipe:'A',turno:'Noturno'};clearForm()");

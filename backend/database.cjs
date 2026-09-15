@@ -51,6 +51,24 @@ function openDatabase(filename) {
       BEGIN SELECT RAISE(ABORT,'Immutable audit'); END;
     PRAGMA user_version=1;
   `);
+  // One-time migration: old public accounts have no reliable approval provenance.
+  if (!db.prepare('PRAGMA table_info(users)').all().some(c=>c.name==='access_status')) {
+    transaction(db,()=>{
+      db.exec(`ALTER TABLE users ADD COLUMN access_status TEXT NOT NULL DEFAULT 'approved';
+        ALTER TABLE users ADD COLUMN requested_team TEXT NOT NULL DEFAULT '';
+        ALTER TABLE users ADD COLUMN security_version INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE users ADD COLUMN created_at TEXT;
+        UPDATE users SET access_status=CASE WHEN active=0 THEN 'blocked' WHEN perfil='Supervisor' THEN 'pending' ELSE 'approved' END;
+        UPDATE users SET active=0 WHERE perfil='Supervisor';
+        DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE active=0);`);
+    });
+  }
+  db.exec(`CREATE TABLE IF NOT EXISTS security_audit (
+    id INTEGER PRIMARY KEY, actor_id TEXT NOT NULL REFERENCES users(id), target_id TEXT NOT NULL REFERENCES users(id),
+    action TEXT NOT NULL, occurred_at TEXT NOT NULL, previous_data TEXT NOT NULL, next_data TEXT NOT NULL
+  );
+  CREATE TRIGGER IF NOT EXISTS security_audit_no_update BEFORE UPDATE ON security_audit BEGIN SELECT RAISE(ABORT,'Immutable audit'); END;
+  CREATE TRIGGER IF NOT EXISTS security_audit_no_delete BEFORE DELETE ON security_audit BEGIN SELECT RAISE(ABORT,'Immutable audit'); END;`);
   if (filename !== ':memory:') fs.chmodSync(filename, 0o600);
   return db;
 }
@@ -73,15 +91,15 @@ function transaction(db, fn) {
   try { const result = fn(); db.exec('COMMIT'); return result; }
   catch (error) { db.exec('ROLLBACK'); throw error; }
 }
-async function createUser(db, { email, nome, password, perfil = 'Supervisor', teams = [] }) {
+async function createUser(db, { email, nome, password, perfil = 'Supervisor', teams = [], pending = false, requestedTeam = '' }) {
   email = String(email || '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) throw new Error('E-mail invalido.');
   if (!nome?.trim() || nome.length > 200 || !['Chefia','Supervisor'].includes(perfil)) throw new Error('Nome ou perfil invalido.');
   if (!Array.isArray(teams) || teams.some(t => typeof t !== 'string' || !t.trim() || t.trim().length > 120)) throw new Error('Equipe invalida.');
   const passwordHash = await hashPassword(password), id = crypto.randomUUID();
   transaction(db, () => {
-    db.prepare('INSERT INTO users(id,email,nome,password_hash,perfil) VALUES (?,?,?,?,?)').run(id,email,nome.trim(),passwordHash,perfil);
-    for (const team of new Set(teams.map(t => t.trim()))) db.prepare('INSERT INTO memberships VALUES (?,?)').run(id,team);
+    db.prepare('INSERT INTO users(id,email,nome,password_hash,perfil,active,access_status,requested_team,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(id,email,nome.trim(),passwordHash,pending?'Supervisor':perfil,pending?0:1,pending?'pending':'approved',pending?requestedTeam:'',new Date().toISOString());
+    if(!pending)for (const team of new Set(teams.map(t => t.trim()))) db.prepare('INSERT INTO memberships VALUES (?,?)').run(id,team);
   });
   return id;
 }

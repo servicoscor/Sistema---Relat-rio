@@ -273,7 +273,7 @@ function createApp(options = {}) {
   });
   app.get('/api/reports/:id/audit',(req,res) => {
     if (req.user.perfil !== 'Chefia') throw fail(403,'Acesso exclusivo da Chefia.');
-    res.json(db.prepare('SELECT * FROM audit WHERE report_id=? ORDER BY id DESC LIMIT 500').all(req.params.id));
+    res.json(db.prepare(`SELECT a.*,u.nome AS actor_nome,u.email AS actor_email FROM audit a JOIN users u ON u.id=a.actor_id WHERE a.report_id=? ORDER BY a.id DESC LIMIT 500`).all(req.params.id));
   });
   // Explicit public files: never serve the database, config, source tree or legacy login.
   app.get('/',(req,res) => res.sendFile(path.join(root,'index.html')));

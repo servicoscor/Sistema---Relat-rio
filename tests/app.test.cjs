@@ -68,6 +68,14 @@ test('update sends loaded version without client supplied author',async()=>{
 test('conflict preserves unsaved draft',async()=>{
   const h=harness(()=>({error:'Este plantao mudou.',status:409}));h.run("state.editing={id:'r',updated_at:'old'};state.dirty=true;state.form.dia=['work']");await h.run('saveRecord()');assert.equal(h.run('state.dirty'),true);assert.equal(h.run('state.form.dia[0]'),'work');assert.match(h.run('state.error'),/mudou/);
 });
+test('consolidated list can delete a report after confirmation',async()=>{
+  const h=harness((url,options)=>options?.method==='DELETE'?{ok:true}:{data:[],count:0});
+  h.run("state.records=[{...state.form,id:'abc',data:'2026-09-09',updated_at:'v1'}];state.editing={id:'abc',updated_at:'v1'};state.dirty=false");
+  assert.ok(h.run('consolidatedView()').includes('data-delete-record'));
+  await h.run("deleteRecord('abc')");
+  assert.equal(h.calls[0].url,'/api/reports/abc');assert.equal(h.calls[0].options.method,'DELETE');
+  assert.equal(h.run('state.editing'),null);assert.equal(h.run('state.dirty'),false);
+});
 test('unauthorized response clears private state immediately',async()=>{
   const h=harness(()=>({error:'Sua sessao expirou.',status:401}));h.run("state.form.dia=['private']");await h.run('loadRecords()');assert.equal(h.run('state.user'),null);assert.equal(h.run("state.form.dia.includes('private')"),false);
 });

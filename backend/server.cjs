@@ -230,6 +230,19 @@ function createApp(options = {}) {
   }
   app.post('/api/reports',save);
   app.put('/api/reports/:id',save);
+  app.delete('/api/reports/:id',(req,res) => {
+    const result = transaction(db,() => {
+      const previous = db.prepare('SELECT * FROM reports WHERE id=?').get(req.params.id);
+      if (!previous || (req.user.perfil !== 'Chefia' && previous.autor_id !== req.user.id)) throw fail(404,'Plantao nao encontrado.');
+      if (!canWrite(req.user,previous.equipe)) throw fail(403,'Equipe nao liberada.');
+      const stamp = new Date(Math.max(Date.now(),Date.parse(previous.updated_at)+1)).toISOString();
+      db.prepare('DELETE FROM reports WHERE id=?').run(previous.id);
+      db.prepare('INSERT INTO audit(report_id,actor_id,operation,occurred_at,previous_data,next_data) VALUES (?,?,?,?,?,?)')
+        .run(previous.id,req.user.id,'DELETE',stamp,JSON.stringify(serialize(previous)),null);
+      return {ok:true};
+    });
+    res.json(result);
+  });
   app.get('/api/reports/:id/audit',(req,res) => {
     if (req.user.perfil !== 'Chefia') throw fail(403,'Acesso exclusivo da Chefia.');
     res.json(db.prepare('SELECT * FROM audit WHERE report_id=? ORDER BY id DESC LIMIT 500').all(req.params.id));

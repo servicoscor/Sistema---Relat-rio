@@ -134,12 +134,15 @@ test('internal API: authentication, isolation, validation, audit and backups', a
       assert.equal(db.prepare('SELECT autor_id FROM reports WHERE id=?').get(record.id).autor_id,a);
       record=update.data;
     });
-    await t.test('audit includes before/after and actor, and deletion is unavailable',async()=>{
+    await t.test('audit includes before/after and actor, and deletion is audited',async()=>{
       assert.equal((await A.request('/api/reports/'+record.id+'/audit')).status,403);
       const audit=(await chief.request('/api/reports/'+record.id+'/audit')).data;assert.equal(audit.length,2);
       assert.equal(JSON.parse(audit[0].previous_data).coordenador,'A');
       assert.equal(JSON.parse(audit[0].next_data).coordenador,'Chefia');
-      assert.equal((await chief.request('/api/reports/'+record.id,'DELETE')).status,404);
+      assert.equal((await B.request('/api/reports/'+record.id,'DELETE')).status,404);
+      const deleted=await chief.request('/api/reports/'+record.id,'DELETE');assert.equal(deleted.status,200);
+      assert.equal(db.prepare('SELECT id FROM reports WHERE id=?').get(record.id),undefined);
+      const after=(await chief.request('/api/reports/'+record.id+'/audit')).data;assert.equal(after[0].operation,'DELETE');assert.equal(JSON.parse(after[0].previous_data).coordenador,'Chefia');assert.equal(after[0].next_data,null);
       assert.throws(()=>db.exec('DELETE FROM audit'),/Immutable audit/);
     });
     await t.test('memberships and disabled accounts take effect immediately',async()=>{
@@ -159,7 +162,7 @@ test('internal API: authentication, isolation, validation, audit and backups', a
       const folder=fs.mkdtempSync(path.join(os.tmpdir(),'plantao-backup-test-'));const file=path.join(folder,'backup.sqlite');
       await backup(db,file);
       const {DatabaseSync}=require('node:sqlite');const restored=new DatabaseSync(file,{readOnly:true});
-      try {assert.equal(restored.prepare('SELECT count(*) AS n FROM reports').get().n,2);assert.equal(restored.prepare('SELECT count(*) AS n FROM audit').get().n,3);assert.equal(restored.prepare('SELECT count(*) AS n FROM users').get().n,4)}
+      try {assert.equal(restored.prepare('SELECT count(*) AS n FROM reports').get().n,1);assert.equal(restored.prepare('SELECT count(*) AS n FROM audit').get().n,4);assert.equal(restored.prepare('SELECT count(*) AS n FROM users').get().n,4)}
       finally{restored.close();fs.unlinkSync(file);fs.rmdirSync(folder)}
     });
     await t.test('rate limit is persistent and repeated bad logins are blocked',async()=>{

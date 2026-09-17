@@ -64,7 +64,7 @@ test('all period pages load even with a smaller server page limit',async()=>{
 });
 test('failed pages never display or export partial totals',async()=>{
   const h=harness(()=>({error:'fail',status:500}));await h.run('loadRecords()');assert.equal(h.run('state.records.length'),0);assert.ok(h.run('state.recordsError'));
-  h.run("state.profile.perfil='Chefia';exportCsv()");assert.match(h.run('consolidatedView()'),/periodo completo/);
+  h.run("state.profile.perfil='Chefia';exportCsv()");assert.match(h.run('consolidatedView()'),/período completo/);
 });
 test('update sends loaded version without client supplied author',async()=>{
   const h=harness((url,options)=>options.method==='PUT'?{id:'record',updated_at:'next'}:{data:[],count:0});

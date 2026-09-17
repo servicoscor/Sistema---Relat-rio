@@ -26,7 +26,13 @@ function validatePayload(body) {
   for (const key of ['integrantes','dia','proximo','faltas','ocorrencias']) {
     if (!Array.isArray(body[key]) || body[key].length > 500) throw fail(400,'Lista invalida ou muito extensa.');
     p[key] = body[key].map(item => {
-      if (['integrantes','dia','proximo'].includes(key)) return text(item,10000,true);
+      if (key === 'integrantes') return text(item,10000,true);
+      if (['dia','proximo'].includes(key)) {
+        if (typeof item === 'string') return { texto:text(item,10000,true), status:'Aberto', responsavel:'' };
+        if (!item || typeof item !== 'object') throw fail(400,'Item invalido.');
+        const status = ['Aberto','Em andamento','Resolvido'].includes(item.status) ? item.status : 'Aberto';
+        return { texto:text(item.texto,10000,true), status, responsavel:text(item.responsavel||'',200) };
+      }
       if (!item || typeof item !== 'object') throw fail(400,'Item invalido.');
       if (key === 'faltas') return { nome: text(item.nome,200,true), motivo: text(item.motivo,10000) };
       if (!['Baixa','Media','Alta'].includes(item.gravidade) || typeof item.hora !== 'string' || !/^$|^([01]\d|2[0-3]):[0-5]\d$/.test(item.hora)) throw fail(400,'Confira a ocorrencia.');
@@ -118,6 +124,14 @@ function createApp(options = {}) {
       throw error;
     }
     res.json({user:result});
+  });
+  app.post('/api/security/backup',requireChief,async (req,res)=>{
+    const fs = require('node:fs');
+    const target = path.join(root,'backups','manual-'+new Date().toISOString().replace(/[:.]/g,'-')+'.sqlite');
+    fs.mkdirSync(path.dirname(target),{recursive:true,mode:0o700});
+    await require('./database.cjs').backup(db,target);
+    fs.chmodSync(target,0o600);
+    res.json({ok:true,file:path.basename(target),created_at:new Date().toISOString()});
   });
   function teams(id) { return db.prepare('SELECT equipe FROM memberships WHERE user_id=? ORDER BY equipe').all(id).map(r=>r.equipe); }
   function defaults(id) { const row=db.prepare('SELECT payload FROM user_defaults WHERE user_id=?').get(id); return row?JSON.parse(row.payload):null; }
@@ -214,6 +228,10 @@ function createApp(options = {}) {
     res.json(result);
   });
   function canWrite(user,team) { return user.perfil === 'Chefia' || teams(user.id).includes(team); }
+  function isClosed(row) {
+    try { return Boolean(JSON.parse(row.payload).fechamento?.em); }
+    catch { return false; }
+  }
   function save(req,res) {
     const payload = validatePayload(req.body);
     if (!canWrite(req.user,payload.equipe)) throw fail(403,'Equipe nao liberada para seu usuario.');
@@ -221,10 +239,13 @@ function createApp(options = {}) {
       const previous = req.params.id ? db.prepare('SELECT * FROM reports WHERE id=?').get(req.params.id) : null;
       if (req.params.id && (!previous || (req.user.perfil !== 'Chefia' && previous.autor_id !== req.user.id))) throw fail(404,'Plantao nao encontrado.');
       if (previous && !canWrite(req.user,previous.equipe)) throw fail(403,'Equipe nao liberada.');
+      if (previous && isClosed(previous) && req.user.perfil !== 'Chefia') throw fail(403,'Plantao fechado. Procure a Chefia para alterar.');
       if (previous && (typeof req.body.updated_at !== 'string' || previous.updated_at !== req.body.updated_at)) throw fail(409,'Este plantao mudou. Reabra pelo Historico antes de salvar.');
       const stamp = new Date(Math.max(Date.now(),previous ? Date.parse(previous.updated_at)+1 : 0)).toISOString();
       const id = previous?.id || crypto.randomUUID();
       payload.assinatura={nome:req.user.nome,perfil:req.user.perfil,user_id:req.user.id,em:stamp,imagem:defaults(req.user.id)?.signature||''};
+      if (previous) payload.fechamento = JSON.parse(previous.payload).fechamento || null;
+      if (req.body.fechar) payload.fechamento={nome:req.user.nome,perfil:req.user.perfil,user_id:req.user.id,em:stamp,imagem:defaults(req.user.id)?.signature||''};
       if (previous) db.prepare('UPDATE reports SET data=?,turno=?,equipe=?,payload=?,updated_at=? WHERE id=?').run(payload.data,payload.turno,payload.equipe,JSON.stringify(payload),stamp,id);
       else db.prepare('INSERT INTO reports VALUES (?,?,?,?,?,?,?,?)').run(id,payload.data,payload.turno,payload.equipe,req.user.id,JSON.stringify(payload),stamp,stamp);
       const row = db.prepare('SELECT * FROM reports WHERE id=?').get(id);
@@ -241,6 +262,7 @@ function createApp(options = {}) {
       const previous = db.prepare('SELECT * FROM reports WHERE id=?').get(req.params.id);
       if (!previous || (req.user.perfil !== 'Chefia' && previous.autor_id !== req.user.id)) throw fail(404,'Plantao nao encontrado.');
       if (!canWrite(req.user,previous.equipe)) throw fail(403,'Equipe nao liberada.');
+      if (isClosed(previous) && req.user.perfil !== 'Chefia') throw fail(403,'Plantao fechado. Procure a Chefia para excluir.');
       const stamp = new Date(Math.max(Date.now(),Date.parse(previous.updated_at)+1)).toISOString();
       db.prepare('DELETE FROM reports WHERE id=?').run(previous.id);
       db.prepare('INSERT INTO audit(report_id,actor_id,operation,occurred_at,previous_data,next_data) VALUES (?,?,?,?,?,?)')

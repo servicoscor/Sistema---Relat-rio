@@ -1,4 +1,4 @@
-﻿const MESES = ['janeiro','fevereiro','marco','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+const MESES = ['janeiro','fevereiro','marco','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 const state = {
   loading: true, error: '', authMode: 'login', authEmail: '', authPass: '', authName: '', authTeam: '',
   user: null, profile: null, view: 'form', records: [], period: 'semana', filterTurn: 'Todos',

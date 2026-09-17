@@ -63,6 +63,17 @@ function openDatabase(filename) {
         DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE active=0);`);
     });
   }
+  if (!db.prepare('PRAGMA table_info(users)').all().some(c=>c.name==='username')) {
+    transaction(db,()=>{
+      db.exec(`ALTER TABLE users ADD COLUMN username TEXT;`);
+      for (const user of db.prepare('SELECT id,email FROM users ORDER BY created_at,id').all()) {
+        db.prepare('UPDATE users SET username=? WHERE id=?').run(uniqueUsername(db,emailPrefix(user.email),user.id),user.id);
+      }
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users(username);');
+    });
+  } else {
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users(username);');
+  }
   db.exec(`CREATE TABLE IF NOT EXISTS security_audit (
     id INTEGER PRIMARY KEY, actor_id TEXT NOT NULL REFERENCES users(id), target_id TEXT NOT NULL REFERENCES users(id),
     action TEXT NOT NULL, occurred_at TEXT NOT NULL, previous_data TEXT NOT NULL, next_data TEXT NOT NULL
@@ -71,6 +82,23 @@ function openDatabase(filename) {
   CREATE TRIGGER IF NOT EXISTS security_audit_no_delete BEFORE DELETE ON security_audit BEGIN SELECT RAISE(ABORT,'Immutable audit'); END;`);
   if (filename !== ':memory:') fs.chmodSync(filename, 0o600);
   return db;
+}
+function normalizeUsername(value) {
+  const username = String(value || '').trim().toLowerCase();
+  if (!/^[a-z0-9._-]{3,40}$/.test(username)) throw new Error('Login invalido. Use 3 a 40 letras, numeros, ponto, hifen ou underline.');
+  return username;
+}
+function emailPrefix(email) {
+  return String(email || '').split('@')[0].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9._-]+/g,'.').replace(/^[._-]+|[._-]+$/g,'').slice(0,32) || 'usuario';
+}
+function uniqueUsername(db,base,ignoreId='') {
+  base = normalizeUsername(base.length >= 3 ? base : `${base}123`);
+  for (let i=0;i<1000;i++) {
+    const candidate = i ? `${base.slice(0,Math.max(3,36-String(i).length))}${i}` : base;
+    const row = db.prepare('SELECT id FROM users WHERE username=?').get(candidate);
+    if (!row || row.id === ignoreId) return candidate;
+  }
+  throw new Error('Nao foi possivel gerar login unico.');
 }
 
 async function hashPassword(password) {
@@ -91,14 +119,15 @@ function transaction(db, fn) {
   try { const result = fn(); db.exec('COMMIT'); return result; }
   catch (error) { db.exec('ROLLBACK'); throw error; }
 }
-async function createUser(db, { email, nome, password, perfil = 'Supervisor', teams = [], pending = false, requestedTeam = '' }) {
+async function createUser(db, { email, username, nome, password, perfil = 'Supervisor', teams = [], pending = false, requestedTeam = '' }) {
   email = String(email || '').trim().toLowerCase();
+  username = username ? normalizeUsername(username) : uniqueUsername(db,emailPrefix(email));
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) throw new Error('E-mail invalido.');
   if (!nome?.trim() || nome.length > 200 || !['Chefia','Supervisor'].includes(perfil)) throw new Error('Nome ou perfil invalido.');
   if (!Array.isArray(teams) || teams.some(t => typeof t !== 'string' || !t.trim() || t.trim().length > 120)) throw new Error('Equipe invalida.');
   const passwordHash = await hashPassword(password), id = crypto.randomUUID();
   transaction(db, () => {
-    db.prepare('INSERT INTO users(id,email,nome,password_hash,perfil,active,access_status,requested_team,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(id,email,nome.trim(),passwordHash,pending?'Supervisor':perfil,pending?0:1,pending?'pending':'approved',pending?requestedTeam:'',new Date().toISOString());
+    db.prepare('INSERT INTO users(id,email,username,nome,password_hash,perfil,active,access_status,requested_team,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(id,email,username,nome.trim(),passwordHash,pending?'Supervisor':perfil,pending?0:1,pending?'pending':'approved',pending?requestedTeam:'',new Date().toISOString());
     if(!pending)for (const team of new Set(teams.map(t => t.trim()))) db.prepare('INSERT INTO memberships VALUES (?,?)').run(id,team);
   });
   return id;
@@ -106,4 +135,4 @@ async function createUser(db, { email, nome, password, perfil = 'Supervisor', te
 function serialize(row) {
   return { ...JSON.parse(row.payload), id: row.id, autor_id: row.autor_id, created_at: row.created_at, updated_at: row.updated_at };
 }
-module.exports = { openDatabase, hashPassword, verifyPassword, createUser, transaction, serialize, backup };
+module.exports = { openDatabase, hashPassword, verifyPassword, createUser, transaction, serialize, backup, normalizeUsername, uniqueUsername, emailPrefix };

@@ -31,6 +31,12 @@ test('security panel is hidden from Supervisor and discards results after logout
   const pending=h.run('loadSecurity()');h.run('resetSession()');finish({users:[{email:'PRIVATE'}],count:1});await pending;
   assert.equal(h.run('state.securityUsers.length'),0);
 });
+test('login form and security panel expose short login fields',()=>{
+  const h=harness();
+  assert.ok(h.run('authView()').includes('E-mail ou login'));
+  h.run("state.profile.perfil='Chefia';state.securityUsers=[{id:'u',email:'u@example.test',username:'usuario',nome:'Usuario',perfil:'Supervisor',access_status:'pending',requested_team:'A',teams:[],security_version:1,created_at:''}]");
+  const html=h.run('securityView()');assert.ok(html.includes('security-username-0'));assert.ok(html.includes('usuario'));
+});
 test('new reports use personal defaults and shared groups never leak between teams',()=>{
   const h=harness();h.run("state.defaults={equipe:'A',turno:'Noturno'};clearForm()");
   assert.equal(h.run('state.form.coordenador'),'A');assert.equal(h.run('state.form.turno'),'Noturno');

@@ -22,6 +22,8 @@ test('legacy Supervisors require one-time review; Chefia and records are preserv
     assert.equal(db.prepare("SELECT active FROM users WHERE id='sup'").get().active,0);
     assert.equal(db.prepare("SELECT access_status FROM users WHERE id='blocked'").get().access_status,'blocked');
     assert.equal(db.prepare("SELECT active FROM users WHERE id='chief'").get().active,1);
+    assert.equal(db.prepare("SELECT username FROM users WHERE id='chief'").get().username,'chief');
+    assert.equal(db.prepare("SELECT username FROM users WHERE id='sup'").get().username,'sup');
     assert.equal(db.prepare("SELECT count(*) AS n FROM sessions WHERE user_id='sup'").get().n,0);
     assert.equal(db.prepare("SELECT count(*) AS n FROM sessions WHERE user_id='chief'").get().n,1);
     assert.equal(db.prepare("SELECT autor_id FROM reports WHERE id='report'").get().autor_id,'sup');

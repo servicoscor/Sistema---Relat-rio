@@ -21,7 +21,7 @@ function fetch(url,options={}) {
 test('internal API: authentication, isolation, validation, audit and backups', async t => {
   const db = openDatabase(':memory:');
   const password = 'Password-only-for-tests!';
-  const a = await createUser(db,{email:'a@example.test',nome:'A',password,teams:['A']});
+  const a = await createUser(db,{email:'a@example.test',username:'alpha',nome:'A',password,teams:['A']});
   const b = await createUser(db,{email:'b@example.test',nome:'B',password,teams:['B']});
   await createUser(db,{email:'chief@example.test',nome:'Chefia',password,perfil:'Chefia'});
   const app = createApp({db,production:false,origin:'http://127.0.0.1:3000'});
@@ -56,8 +56,9 @@ test('internal API: authentication, isolation, validation, audit and backups', a
       assert.equal((await c.request('/api/register','POST',body)).status,201);
       assert.equal((await c.request('/api/register','POST',body)).status,409);
       const signed=await c.login(body.email);assert.equal(signed.status,403);
-      const pending=db.prepare('SELECT id,perfil,active,access_status FROM users WHERE email=?').get(body.email);
+      const pending=db.prepare('SELECT id,username,perfil,active,access_status FROM users WHERE email=?').get(body.email);
       assert.equal(pending.perfil,'Supervisor');assert.equal(pending.active,0);assert.equal(pending.access_status,'pending');
+      assert.equal(pending.username,'new');
       assert.equal(db.prepare('SELECT count(*) AS n FROM memberships WHERE user_id=?').get(pending.id).n,0);
       assert.equal((await c.request('/api/reports','POST',payload)).status,401);
       assert.equal((await c.request('/api/groups?equipe=Nova')).status,401);
@@ -67,7 +68,7 @@ test('internal API: authentication, isolation, validation, audit and backups', a
       await A.request('/api/session');const previous=A.cookie;
       assert.equal((await A.request('/api/login','POST',{email:'a@example.test',password},{'x-csrf-token':''})).status,403);
       assert.equal((await A.request('/api/login','POST',{email:'a@example.test',password},{origin:'https://attacker.test'})).status,403);
-      assert.equal((await A.login('a@example.test')).status,200);assert.notEqual(A.cookie,previous);
+      assert.equal((await A.login('alpha')).status,200);assert.notEqual(A.cookie,previous);
       assert.notEqual(db.prepare('SELECT password_hash FROM users WHERE id=?').get(a).password_hash,password);
       assert.equal((await B.login('b@example.test')).status,200);
       assert.equal((await chief.login('chief@example.test')).status,200);
@@ -79,14 +80,14 @@ test('internal API: authentication, isolation, validation, audit and backups', a
       assert.ok(!JSON.stringify(list.data).includes('password_hash'));
       const pending=list.data.users.find(u=>u.email==='new@example.test');
       const route='/api/security/users/'+pending.id;
-      const approval={action:'approve',teams:['Liberada'],version:pending.security_version,perfil:'Chefia'};
+      const approval={action:'approve',teams:['Liberada'],username:'novo',version:pending.security_version,perfil:'Chefia'};
       assert.equal((await A.request(route,'PUT',approval)).status,403);
       assert.equal((await chief.request(route,'PUT',approval,{'x-csrf-token':''})).status,403);
       assert.equal((await chief.request(route,'PUT',{...approval,teams:[]})).status,400);
       const granted=await chief.request(route,'PUT',approval);assert.equal(granted.status,200);
-      assert.equal(granted.data.user.perfil,'Supervisor');assert.deepEqual(granted.data.user.teams,['Liberada']);
+      assert.equal(granted.data.user.perfil,'Supervisor');assert.equal(granted.data.user.username,'novo');assert.deepEqual(granted.data.user.teams,['Liberada']);
       assert.equal((await chief.request(route,'PUT',approval)).status,409);
-      const c=client();assert.equal((await c.login(pending.email)).status,200);
+      const c=client();assert.equal((await c.login('novo')).status,200);
       assert.equal((await c.request('/api/reports','POST',{...payload,equipe:'Nova'})).status,403);
       const own=await c.request('/api/reports','POST',{...payload,equipe:'Liberada'});assert.equal(own.status,201);
       const blocked=await chief.request(route,'PUT',{action:'block',version:granted.data.user.security_version});assert.equal(blocked.status,200);

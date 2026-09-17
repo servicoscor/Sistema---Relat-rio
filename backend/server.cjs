@@ -2,7 +2,7 @@ const express = require('express');
 const helmet = require('helmet');
 const crypto = require('node:crypto');
 const path = require('node:path');
-const { openDatabase, verifyPassword, createUser, transaction, serialize } = require('./database.cjs');
+const { openDatabase, verifyPassword, createUser, transaction, serialize, normalizeUsername } = require('./database.cjs');
 const root = path.join(__dirname, '..');
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 const token = () => crypto.randomBytes(32).toString('base64url');
@@ -71,7 +71,7 @@ function createApp(options = {}) {
   app.use('/api',(req,res,next) => {
     const raw = (req.headers.cookie || '').split(';').map(s=>s.trim()).find(s=>s.startsWith('plantao_session='))?.slice(16);
     req.authSession = raw && db.prepare('SELECT * FROM sessions WHERE token_hash=? AND expires>?').get(digest(raw),Date.now());
-    req.user = req.authSession?.user_id && db.prepare('SELECT id,email,nome,perfil FROM users WHERE id=? AND active=1 AND access_status=\'approved\'').get(req.authSession.user_id);
+    req.user = req.authSession?.user_id && db.prepare('SELECT id,email,username,nome,perfil FROM users WHERE id=? AND active=1 AND access_status=\'approved\'').get(req.authSession.user_id);
     if (!['GET','HEAD','OPTIONS'].includes(req.method)) {
       if (req.get('origin') && req.get('origin') !== origin) return next(fail(403,'Origem nao autorizada.'));
       if (!req.authSession || req.get('x-csrf-token') !== req.authSession.csrf) return next(fail(403,'Sessao de seguranca expirada. Atualize a pagina.'));
@@ -81,7 +81,7 @@ function createApp(options = {}) {
   function requireUser(req,res,next) { if (!req.user) return next(fail(401,'Sua sessao expirou. Entre novamente.')); next(); }
   function requireChief(req,res,next) { if (!req.user) return next(fail(401,'Entre novamente.')); if(req.user.perfil!=='Chefia')return next(fail(403,'Acesso exclusivo da Chefia.'));next(); }
   app.use('/api/security',requireChief);
-  function safeUser(id){const u=db.prepare('SELECT id,email,nome,perfil,active,access_status,requested_team,security_version,created_at FROM users WHERE id=?').get(id);return u?{...u,teams:teams(id)}:null;}
+  function safeUser(id){const u=db.prepare('SELECT id,email,username,nome,perfil,active,access_status,requested_team,security_version,created_at FROM users WHERE id=?').get(id);return u?{...u,teams:teams(id)}:null;}
   app.get('/api/security/users',(req,res)=>{
     const offset=Number(req.query.offset||0);
     if(!Number.isSafeInteger(offset)||offset<0)throw fail(400,'Página inválida.');
@@ -95,14 +95,17 @@ function createApp(options = {}) {
   });
   app.put('/api/security/users/:id',(req,res)=>{
     const {action,teams:allowed,version}=req.body||{};
+    const username=req.body?.username ? normalizeUsername(req.body.username) : '';
     if(!['approve','block'].includes(action)||!Number.isSafeInteger(version))throw fail(400,'Ação inválida.');
     if(action==='approve'&&(!Array.isArray(allowed)||!allowed.length||allowed.length>30||allowed.some(t=>typeof t!=='string'||!t.trim()||t.trim().length>120)))throw fail(400,'Defina pelo menos uma equipe autorizada, até 30 equipes.');
-    const result=transaction(db,()=>{
+    let result;
+    try { result=transaction(db,()=>{
       const previous=safeUser(req.params.id);
       if(!previous)throw fail(404,'Usuário não encontrado.');
       if(previous.perfil!=='Supervisor')throw fail(403,'Este painel gerencia acessos de Supervisores.');
       if(previous.security_version!==version)throw fail(409,'O acesso foi alterado por outra pessoa. Atualize o painel.');
       const approved=action==='approve';
+      if(username)db.prepare('UPDATE users SET username=?,security_version=security_version+1 WHERE id=?').run(username,previous.id);
       db.prepare('UPDATE users SET active=?,access_status=?,security_version=security_version+1 WHERE id=?').run(approved?1:0,approved?'approved':'blocked',previous.id);
       db.prepare('DELETE FROM memberships WHERE user_id=?').run(previous.id);
       if(approved)for(const team of new Set(allowed.map(t=>t.trim())))db.prepare('INSERT INTO memberships VALUES (?,?)').run(previous.id,team);
@@ -110,7 +113,10 @@ function createApp(options = {}) {
       const next=safeUser(previous.id);
       db.prepare('INSERT INTO security_audit(actor_id,target_id,action,occurred_at,previous_data,next_data) VALUES (?,?,?,?,?,?)').run(req.user.id,previous.id,action,new Date().toISOString(),JSON.stringify(previous),JSON.stringify(next));
       return next;
-    });
+    }); } catch(error) {
+      if(error.message?.includes('UNIQUE constraint failed: users.username')) throw fail(409,'Esse login ja esta em uso.');
+      throw error;
+    }
     res.json({user:result});
   });
   function teams(id) { return db.prepare('SELECT equipe FROM memberships WHERE user_id=? ORDER BY equipe').all(id).map(r=>r.equipe); }
@@ -172,20 +178,20 @@ function createApp(options = {}) {
   });
   app.post('/api/login',async (req,res) => {
     const {email,password} = req.body || {};
-    if (typeof email !== 'string' || email.length > 254 || typeof password !== 'string' || password.length > 128) throw fail(400,'Informe e-mail e senha.');
+    if (typeof email !== 'string' || email.length > 254 || typeof password !== 'string' || password.length > 128) throw fail(400,'Informe e-mail ou usuario e senha.');
     const normalized = email.trim().toLowerCase();
-    checkRate('ip:'+digest(req.ip),60); checkRate('email:'+digest(normalized),10);
-    const user = db.prepare('SELECT * FROM users WHERE email=?').get(normalized);
-    if (!await verifyPassword(password,user?.password_hash || dummyHash) || !user) throw fail(401,'E-mail ou senha invalidos.');
+    checkRate('ip:'+digest(req.ip),60); checkRate('login:'+digest(normalized),10);
+    const user = db.prepare('SELECT * FROM users WHERE email=? OR username=?').get(normalized,normalized);
+    if (!await verifyPassword(password,user?.password_hash || dummyHash) || !user) throw fail(401,'E-mail, usuario ou senha invalidos.');
     if(user.access_status==='pending')throw fail(403,'Seu cadastro aguarda aprovação da Chefia.');
     if(!user.active||user.access_status!=='approved')throw fail(403,'Acesso bloqueado. Procure a Chefia.');
     // The account may have been disabled or had its password reset while scrypt ran.
-    const current = db.prepare('SELECT id,email,nome,perfil FROM users WHERE id=? AND active=1 AND access_status=\'approved\' AND password_hash=?').get(user.id,user.password_hash);
-    if (!current) throw fail(401,'E-mail ou senha invalidos.');
+    const current = db.prepare('SELECT id,email,username,nome,perfil FROM users WHERE id=? AND active=1 AND access_status=\'approved\' AND password_hash=?').get(user.id,user.password_hash);
+    if (!current) throw fail(401,'E-mail, usuario ou senha invalidos.');
     if (!db.prepare('SELECT token_hash FROM sessions WHERE token_hash=? AND expires>?').get(req.authSession.token_hash,Date.now())) throw fail(403,'Sessao encerrada. Atualize a pagina.');
     db.prepare('DELETE FROM sessions WHERE token_hash=?').run(req.authSession.token_hash);
     req.authSession = newSession(res,user.id); req.user=current;
-    db.prepare('DELETE FROM attempts WHERE key=?').run('email:'+digest(normalized));
+    db.prepare('DELETE FROM attempts WHERE key=?').run('login:'+digest(normalized));
     res.json(sessionData(req));
   });
   app.post('/api/logout',(req,res) => {

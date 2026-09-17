@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const readline = require('node:readline/promises');
 const { Writable } = require('node:stream');
-const { openDatabase, createUser, hashPassword, transaction, backup } = require('./database.cjs');
+const { openDatabase, createUser, hashPassword, transaction, backup, normalizeUsername } = require('./database.cjs');
 
 async function passwordPrompt() {
   if (!process.stdin.isTTY) throw new Error('Execute em um terminal interativo para informar a senha com seguranca.');
@@ -22,8 +22,8 @@ async function main() {
   process.umask(0o077);
   const [command,...args] = process.argv.slice(2);
   const filename = process.env.DATABASE_PATH || path.join(__dirname,'../data/relatorios.sqlite');
-  if (!['init','create-user','list-users','grant-team','revoke-team','reset-password','disable-user','backup'].includes(command)) {
-    throw new Error('Comandos: init | create-user EMAIL NOME Chefia|Supervisor [EQUIPE...] | list-users | grant-team EMAIL EQUIPE | revoke-team EMAIL EQUIPE | reset-password EMAIL | disable-user EMAIL | backup ARQUIVO');
+  if (!['init','create-user','list-users','set-login','grant-team','revoke-team','reset-password','disable-user','backup'].includes(command)) {
+    throw new Error('Comandos: init | create-user EMAIL NOME Chefia|Supervisor [EQUIPE...] | set-login EMAIL_OU_LOGIN LOGIN | list-users | grant-team EMAIL_OU_LOGIN EQUIPE | revoke-team EMAIL_OU_LOGIN EQUIPE | reset-password EMAIL_OU_LOGIN | disable-user EMAIL_OU_LOGIN | backup ARQUIVO');
   }
   if (!['init','create-user'].includes(command) && !fs.existsSync(filename)) throw new Error('Banco nao encontrado. Confira DATABASE_PATH.');
   // A backup must capture the original schema before any pending migrations.
@@ -35,7 +35,7 @@ async function main() {
       await createUser(db,{email,nome,perfil,teams,password:await passwordPrompt()});
       console.log('Conta criada.'); return;
     }
-    if (command === 'list-users') { console.table(db.prepare('SELECT email,nome,perfil,active,access_status FROM users ORDER BY nome').all()); return; }
+    if (command === 'list-users') { console.table(db.prepare('SELECT email,username,nome,perfil,active,access_status FROM users ORDER BY nome').all()); return; }
     if (command === 'backup') {
       if (!args[0]) throw new Error('Informe o arquivo de destino do backup.');
       const target = path.resolve(args[0]);
@@ -44,9 +44,13 @@ async function main() {
       await backup(db,target); fs.chmodSync(target,0o600);
       console.log('Backup consistente criado. Armazene uma copia fora do servidor.'); return;
     }
-    const user = db.prepare('SELECT * FROM users WHERE email=?').get((args[0]||'').trim().toLowerCase());
+    const lookup = (args[0]||'').trim().toLowerCase();
+    const user = db.prepare('SELECT * FROM users WHERE email=? OR username=?').get(lookup,lookup);
     if (!user) throw new Error('Usuario nao encontrado.');
-    if (command === 'reset-password') {
+    if (command === 'set-login') {
+      const username = normalizeUsername(args[1]);
+      db.prepare('UPDATE users SET username=? WHERE id=?').run(username,user.id);
+    } else if (command === 'reset-password') {
       const passwordHash = await hashPassword(await passwordPrompt());
       transaction(db,() => {
         db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(passwordHash,user.id);

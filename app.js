@@ -191,7 +191,7 @@ function auditPanel(){if(!state.auditRecord)return '';return `<div class="modal-
 async function deleteRecord(id){
   if(state.saving)return;
   const row=state.records.find(r=>r.id===id);if(!row)return;
-  if(!confirm(`Excluir o plantão de ${shortDate(row.data)} - ${row.turno} - ${row.equipe||'sem equipe'}?`))return;
+  const typed=prompt(`Para excluir definitivamente o plantão de ${shortDate(row.data)} - ${row.turno} - ${row.equipe||'sem equipe'}, digite EXCLUIR:`);if(typed!=='EXCLUIR')return;
   const version=sessionVersion;
   state.saving=true;state.error='';
   try{

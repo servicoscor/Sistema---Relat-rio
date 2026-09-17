@@ -6,7 +6,7 @@ const path=require('node:path');
 const source=fs.readFileSync(path.join(__dirname,'../app.js'),'utf8').replace(/init\(\);\s*$/,'');
 function harness(handler=async()=>({data:[],count:0}),date){
   const el={innerHTML:''},timers=[],calls=[];
-  const ctx={console,URL,window:{addEventListener(){}},document:{getElementById:()=>el,addEventListener(){}},confirm:()=>true,
+  const ctx={console,URL,window:{addEventListener(){}},document:{getElementById:()=>el,addEventListener(){}},confirm:()=>true,prompt:()=>ctx.promptValue??'EXCLUIR',
     setTimeout:fn=>timers.push(fn),clearTimeout(){},fetch:async(url,options)=>{calls.push({url,options});const result=await handler(url,options);return {ok:!result.error,status:result.status||200,json:async()=>result}}};
   if(date)ctx.Date=class extends Date{constructor(...args){super(...(args.length?args:[date]))}};
   vm.createContext(ctx);vm.runInContext(source,ctx);

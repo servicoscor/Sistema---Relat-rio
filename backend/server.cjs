@@ -86,6 +86,24 @@ function createApp(options = {}) {
   });
   function requireUser(req,res,next) { if (!req.user) return next(fail(401,'Sua sessao expirou. Entre novamente.')); next(); }
   function requireChief(req,res,next) { if (!req.user) return next(fail(401,'Entre novamente.')); if(req.user.perfil!=='Chefia')return next(fail(403,'Acesso exclusivo da Chefia.'));next(); }
+  function publicStats() {
+    const rows = db.prepare('SELECT payload FROM reports').all();
+    let pendencias = 0, fechados = 0;
+    for (const row of rows) {
+      try {
+        const payload = JSON.parse(row.payload);
+        if (payload.fechamento?.em) fechados++;
+        for (const item of payload.proximo||[]) {
+          const status = typeof item === 'string' ? 'Aberto' : (item?.status || 'Aberto');
+          if (status !== 'Resolvido') pendencias++;
+        }
+      } catch {}
+    }
+    const total = rows.length;
+    return { total, pendencias, concluidosPercentual: total ? Math.round((fechados / total) * 100) : 0 };
+  }
+  app.get('/api/public/stats',(req,res)=>res.json(publicStats()));
+
   app.use('/api/security',requireChief);
   function safeUser(id){const u=db.prepare('SELECT id,email,username,nome,perfil,active,access_status,requested_team,security_version,created_at FROM users WHERE id=?').get(id);return u?{...u,teams:teams(id)}:null;}
   app.get('/api/security/users',(req,res)=>{

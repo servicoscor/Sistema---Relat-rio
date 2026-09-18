@@ -135,6 +135,13 @@ test('internal API: authentication, isolation, validation, audit and backups', a
       assert.equal(db.prepare('SELECT autor_id FROM reports WHERE id=?').get(record.id).autor_id,a);
       record=update.data;
     });
+    await t.test('public login analytics expose only aggregate counters',async()=>{
+      const stats=await anon.request('/api/public/stats');assert.equal(stats.status,200);
+      assert.deepEqual(Object.keys(stats.data).sort(),['concluidosPercentual','pendencias','total']);
+      assert.equal(stats.data.total,db.prepare('SELECT count(*) AS n FROM reports').get().n);assert.equal(stats.data.pendencias,0);assert.equal(stats.data.concluidosPercentual,0);
+      assert.ok(!JSON.stringify(stats.data).includes('Chefia'));
+      assert.ok(!JSON.stringify(stats.data).includes('Demanda'));
+    });
     await t.test('audit includes before/after and actor, and deletion is audited',async()=>{
       assert.equal((await A.request('/api/reports/'+record.id+'/audit')).status,403);
       const audit=(await chief.request('/api/reports/'+record.id+'/audit')).data;assert.equal(audit.length,2);

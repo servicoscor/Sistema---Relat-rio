@@ -100,7 +100,15 @@ function createApp(options = {}) {
       } catch {}
     }
     const total = rows.length;
-    return { total, pendencias, concluidosPercentual: total ? Math.round((fechados / total) * 100) : 0 };
+    const activityRows = db.prepare(`SELECT data,count(*) AS total FROM reports WHERE data>=date('now','-7 days') GROUP BY data`).all();
+    const byDate = Object.fromEntries(activityRows.map(r=>[r.data,r.total]));
+    const hoje = new Date();
+    const atividade = Array.from({length:8},(_,i)=>{
+      const d = new Date(Date.UTC(hoje.getUTCFullYear(),hoje.getUTCMonth(),hoje.getUTCDate()-7+i));
+      const data = d.toISOString().slice(0,10);
+      return { data, total: byDate[data] || 0 };
+    });
+    return { total, pendencias, concluidosPercentual: total ? Math.round((fechados / total) * 100) : 0, atividade };
   }
   app.get('/api/public/stats',(req,res)=>res.json(publicStats()));
 

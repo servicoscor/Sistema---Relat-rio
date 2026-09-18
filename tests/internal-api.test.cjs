@@ -137,8 +137,8 @@ test('internal API: authentication, isolation, validation, audit and backups', a
     });
     await t.test('public login analytics expose only aggregate counters',async()=>{
       const stats=await anon.request('/api/public/stats');assert.equal(stats.status,200);
-      assert.deepEqual(Object.keys(stats.data).sort(),['concluidosPercentual','pendencias','total']);
-      assert.equal(stats.data.total,db.prepare('SELECT count(*) AS n FROM reports').get().n);assert.equal(stats.data.pendencias,0);assert.equal(stats.data.concluidosPercentual,0);
+      assert.deepEqual(Object.keys(stats.data).sort(),['atividade','concluidosPercentual','pendencias','total']);
+      assert.equal(stats.data.total,db.prepare('SELECT count(*) AS n FROM reports').get().n);assert.equal(stats.data.pendencias,0);assert.equal(stats.data.concluidosPercentual,0);assert.equal(stats.data.atividade.length,8);assert.ok(stats.data.atividade.every(x=>/^\d{4}-\d{2}-\d{2}$/.test(x.data)&&Number.isInteger(x.total)));
       assert.ok(!JSON.stringify(stats.data).includes('Chefia'));
       assert.ok(!JSON.stringify(stats.data).includes('Demanda'));
     });
